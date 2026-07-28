@@ -1,0 +1,74 @@
+name: Sync recordings index
+
+# Recordings arrive in daily batches, so a few passes a day keeps the index
+# close to live. The weekly full run is the safety net: --recent only looks at
+# the newest folders, so anything that lands late would otherwise be missed.
+on:
+  schedule:
+    - cron: '0 */6 * * *' # every 6 hours — recent folders only
+    - cron: '30 2 * * 0' # Sundays 02:30 UTC — full reconcile
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Run a full reconcile instead of recent-only'
+        type: boolean
+        default: false
+
+# Two indexers writing at once would fight over the same rows.
+concurrency:
+  group: sync-index
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Decide scope
+        id: scope
+        run: |
+          if [ "${{ github.event.schedule }}" = "30 2 * * 0" ] || [ "${{ inputs.full }}" = "true" ]; then
+            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "mode=full reconcile" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=--recent=3" >> "$GITHUB_OUTPUT"
+            echo "mode=incremental (newest 3 folders per group)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Index
+        id: index
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ap-south-1
+          S3_BUCKET: poshnee-call-recordings
+          S3_PREFIX: dialer/
+        run: |
+          npx tsx scripts/index-recordings.ts ${{ steps.scope.outputs.args }} | tee run.log
+
+      # Makes the Actions page show what happened without opening the log.
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Index sync — ${{ steps.scope.outputs.mode }}"
+            echo ""
+            if [ -f run.log ]; then
+              echo '```'
+              tail -n 6 run.log
+              echo '```'
+            else
+              echo "The indexer did not produce output — check the step log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
