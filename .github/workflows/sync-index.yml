@@ -55,6 +55,9 @@ jobs:
           S3_BUCKET: poshnee-call-recordings
           S3_PREFIX: dialer/
         run: |
+          # Without pipefail the pipeline reports tee's exit code, so a crashed
+          # indexer would be indistinguishable from a successful sync.
+          set -o pipefail
           npx tsx scripts/index-recordings.ts ${{ steps.scope.outputs.args }} | tee run.log
 
       # Makes the Actions page show what happened without opening the log.
