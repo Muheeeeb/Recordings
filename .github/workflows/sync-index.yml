@@ -1,12 +1,14 @@
 name: Sync recordings index
 
-# Recordings arrive in daily batches, so a few passes a day keeps the index
-# close to live. The weekly full run is the safety net: --recent only looks at
-# the newest folders, so anything that lands late would otherwise be missed.
+# The dialer uploads one batch a day, so the index is refreshed once a day
+# rather than polled. 23:00 UTC is 04:00 Pakistan time — after the upload
+# window and before anyone is looking at the dashboard.
+#
+# Sunday's run does a full reconcile instead of an incremental one: --recent
+# only inspects the newest folders, and a late upload can land in an older one.
 on:
   schedule:
-    - cron: '0 */6 * * *' # every 6 hours — recent folders only
-    - cron: '30 2 * * 0' # Sundays 02:30 UTC — full reconcile
+    - cron: '0 23 * * *'
   workflow_dispatch:
     inputs:
       full:
@@ -36,16 +38,16 @@ jobs:
       - name: Decide scope
         id: scope
         run: |
-          if [ "${{ github.event.schedule }}" = "30 2 * * 0" ] || [ "${{ inputs.full }}" = "true" ]; then
+          # %u is 7 on Sunday. A manual run can force a full pass any day.
+          if [ "$(date -u +%u)" = "7" ] || [ "${{ inputs.full }}" = "true" ]; then
             echo "args=" >> "$GITHUB_OUTPUT"
             echo "mode=full reconcile" >> "$GITHUB_OUTPUT"
           else
-            echo "args=--recent=3" >> "$GITHUB_OUTPUT"
-            echo "mode=incremental (newest 3 folders per group)" >> "$GITHUB_OUTPUT"
+            echo "args=--recent=2" >> "$GITHUB_OUTPUT"
+            echo "mode=incremental (newest 2 folders per group)" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Index
-        id: index
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -72,6 +74,6 @@ jobs:
               tail -n 6 run.log
               echo '```'
             else
-              echo "The indexer did not produce output — check the step log."
+              echo "The indexer produced no output — the run failed before it started."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
