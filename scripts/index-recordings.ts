@@ -15,7 +15,7 @@
  */
 
 import { ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3'
-import { db, ensureSchema, splitKey } from '../lib/db'
+import { db, ensureSchema, refreshStats, splitKey } from '../lib/db'
 import { parseRecording } from '../lib/parse'
 
 const BUCKET = process.env.S3_BUCKET ?? 'poshnee-call-recordings'
@@ -184,6 +184,10 @@ async function main() {
 
   await flush(batch, groups, agents)
   indexed += batch.length
+
+  // The dashboard reads these back as one row, so they are computed here where
+  // the cost does not sit in front of a page load.
+  await refreshStats()
 
   const total = await db().execute('SELECT count(*) AS n FROM recordings')
   const elapsed = Math.round((Date.now() - started) / 1000)

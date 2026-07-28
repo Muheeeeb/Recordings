@@ -73,6 +73,13 @@ const TABLES = [
      strikes       INTEGER NOT NULL DEFAULT 0,
      blocked_until INTEGER,
      updated_at    INTEGER)`,
+  // The dashboard totals are aggregates over every row. They only change when
+  // the indexer runs, so they are computed once and read back as a single row
+  // rather than recomputed on every page load.
+  `CREATE TABLE IF NOT EXISTS stats_cache (
+     id          INTEGER PRIMARY KEY CHECK (id = 1),
+     payload     TEXT NOT NULL,
+     computed_at INTEGER NOT NULL)`,
 ]
 
 const INDEXES = [
@@ -222,7 +229,44 @@ export type Stats = {
   perAgent: { name: string; count: number }[]
 }
 
+/** Falls back to recomputing if the indexer has not refreshed in a day. */
+const STATS_TTL_SECONDS = 24 * 60 * 60
+
+/**
+ * Reads the precomputed totals. The aggregates scan every row, which is slow
+ * enough to notice over a long network hop, and they only change when the
+ * indexer runs — so the dashboard reads one cached row instead.
+ */
 export async function getStats(): Promise<Stats> {
+  try {
+    const cached = await db().execute(
+      'SELECT payload, computed_at FROM stats_cache WHERE id = 1'
+    )
+    if (cached.rows.length > 0) {
+      const row = cached.rows[0] as unknown as { payload: string; computed_at: number }
+      if (now() - Number(row.computed_at) < STATS_TTL_SECONDS) {
+        return JSON.parse(String(row.payload)) as Stats
+      }
+    }
+  } catch {
+    // A missing or unreadable cache is not a failure — recompute below.
+  }
+  return refreshStats()
+}
+
+/** Recomputes the totals and stores them. Called at the end of every index run. */
+export async function refreshStats(): Promise<Stats> {
+  const stats = await computeStats()
+  await db().execute({
+    sql: `INSERT INTO stats_cache (id, payload, computed_at) VALUES (1, ?, ?)
+          ON CONFLICT (id) DO UPDATE SET
+            payload = excluded.payload, computed_at = excluded.computed_at`,
+    args: [JSON.stringify(stats), now()],
+  })
+  return stats
+}
+
+async function computeStats(): Promise<Stats> {
   const [totals, perDay, perGroup, perAgent] = await Promise.all([
     db().execute(
       `SELECT count(*) AS total, sum(sz) AS bytes,
