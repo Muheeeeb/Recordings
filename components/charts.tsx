@@ -77,8 +77,12 @@ function Tooltip({ tip }: { tip: Tip }) {
 /** Vertical columns — recordings per calendar day. */
 export function DayChart({
   data,
+  onSelect,
+  selected,
 }: {
   data: { day: number; count: number; bytes: number }[]
+  onSelect?: (day: number) => void
+  selected?: number | null
 }) {
   const [tip, setTip] = useState<Tip>(null)
   if (data.length === 0) {
@@ -120,11 +124,15 @@ export function DayChart({
           <div className="absolute inset-0 flex items-end">
             {data.map((d) => {
               const h = (d.count / top) * H
+              // With a day selected the others recede, so the comparison stays
+              // readable instead of the selection being the only thing visible.
+              const dimmed = selected != null && selected !== d.day
               return (
                 <div
                   key={d.day}
-                  className="flex h-full items-end justify-center"
+                  className={`flex h-full items-end justify-center ${onSelect ? 'cursor-pointer' : ''}`}
                   style={{ width: `${slot}%` }}
+                  onClick={() => onSelect?.(d.day)}
                   onMouseEnter={(e) => {
                     const box = e.currentTarget.parentElement!.getBoundingClientRect()
                     const cell = e.currentTarget.getBoundingClientRect()
@@ -135,6 +143,7 @@ export function DayChart({
                       lines: [
                         `${d.count.toLocaleString()} recordings`,
                         bytes(d.bytes),
+                        ...(onSelect ? ['click to filter to this day'] : []),
                       ],
                     })
                   }}
@@ -145,6 +154,7 @@ export function DayChart({
                       maxWidth: BAR_MAX,
                       height: Math.max(h, 2),
                       background: 'var(--series-1)',
+                      opacity: dimmed ? 0.35 : 1,
                       borderRadius: `${RADIUS}px ${RADIUS}px 0 0`,
                       marginInline: 'auto',
                       // 2px of surface keeps neighbouring columns apart without

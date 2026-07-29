@@ -16,16 +16,72 @@ type Row = {
   size_bytes: number | null
 }
 
+type StatCell = { day: number; group: string; count: number; bytes: number }
 type Stats = {
-  total: number
-  bytes: number
-  days: number
-  agents: number
-  firstDay: number | null
-  lastDay: number | null
-  perDay: { day: number; count: number; bytes: number }[]
-  perGroup: { name: string; count: number; bytes: number }[]
+  cells: StatCell[]
   perAgent: { name: string; count: number }[]
+}
+
+/** YYYY-MM-DD from a date input to the YYYYMMDD integer the grid is keyed by. */
+function toDayNumber(value: string): number | null {
+  if (!value) return null
+  const n = Number(value.replace(/-/g, ''))
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Everything on the dashboard comes from the day-by-group grid, so applying a
+ * date range or a group is a filter over a few dozen rows rather than another
+ * trip to the database.
+ */
+function summarise(cells: StatCell[], group: string, from: string, to: string) {
+  const lo = toDayNumber(from)
+  const hi = toDayNumber(to)
+  const matching = cells.filter(
+    (c) =>
+      (!group || c.group === group) &&
+      (lo === null || c.day >= lo) &&
+      (hi === null || c.day <= hi)
+  )
+
+  const byDay = new Map<number, { count: number; bytes: number }>()
+  const byGroup = new Map<string, { count: number; bytes: number }>()
+  let total = 0
+  let bytes = 0
+
+  for (const cell of matching) {
+    total += cell.count
+    bytes += cell.bytes
+    const d = byDay.get(cell.day) ?? { count: 0, bytes: 0 }
+    d.count += cell.count
+    d.bytes += cell.bytes
+    byDay.set(cell.day, d)
+    const g = byGroup.get(cell.group) ?? { count: 0, bytes: 0 }
+    g.count += cell.count
+    g.bytes += cell.bytes
+    byGroup.set(cell.group, g)
+  }
+
+  const perDay = [...byDay.entries()]
+    .map(([day, v]) => ({ day, ...v }))
+    .sort((a, b) => a.day - b.day)
+  const perGroup = [...byGroup.entries()]
+    .map(([name, v]) => ({ name, ...v }))
+    .sort((a, b) => b.count - a.count)
+
+  return {
+    total,
+    bytes,
+    perDay,
+    perGroup,
+    days: perDay.length,
+    firstDay: perDay[0]?.day ?? null,
+    lastDay: perDay[perDay.length - 1]?.day ?? null,
+    busiest: perDay.reduce<{ day: number; count: number } | null>(
+      (best, d) => (!best || d.count > best.count ? d : best),
+      null
+    ),
+  }
 }
 
 const GROUPS = [
@@ -184,10 +240,18 @@ export default function SearchPage() {
   const control =
     'rounded-lg border border-[var(--hairline)] bg-[var(--plane)] px-3 py-2 text-[var(--ink)] outline-none focus:border-[var(--series-1)]'
 
+  // Recomputed as the filters change; the grid it reads is only a few dozen
+  // rows, so this is cheaper than asking the server again.
+  const view = stats ? summarise(stats.cells, group, from, to) : null
+
   const range =
-    stats?.firstDay && stats?.lastDay
-      ? `${formatDay(stats.firstDay)} – ${formatDay(stats.lastDay)}`
+    view?.firstDay && view?.lastDay
+      ? view.firstDay === view.lastDay
+        ? formatDay(view.firstDay)
+        : `${formatDay(view.firstDay)} – ${formatDay(view.lastDay)}`
       : undefined
+
+  const filtered = Boolean(group || from || to)
 
   return (
     <main className="min-h-screen bg-[var(--plane)]">
@@ -217,49 +281,69 @@ export default function SearchPage() {
 
       <div className="mx-auto max-w-6xl space-y-5 px-4 py-6">
         {/* Dashboard ------------------------------------------------------ */}
+        {filtered && (
+          <p className="text-[13px] text-[var(--muted)]">
+            Showing{' '}
+            <span className="text-[var(--ink)]">
+              {group ? group.replace(/_/g, ' ') : 'all groups'}
+            </span>
+            {range ? <> · <span className="text-[var(--ink)]">{range}</span></> : null}
+          </p>
+        )}
+
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
-            label="Total recordings"
-            value={stats ? stats.total.toLocaleString() : '—'}
+            label={filtered ? 'Recordings in range' : 'Total recordings'}
+            value={view ? view.total.toLocaleString() : '—'}
             sub={range}
             hero
           />
           <StatTile
-            label="Storage used"
-            value={stats ? bytes(stats.bytes) : '—'}
-            sub={stats && stats.total ? `${Math.round(stats.bytes / stats.total / 1024)} KB average` : undefined}
-          />
-          <StatTile
-            label="Busiest day"
-            value={
-              stats && stats.perDay.length
-                ? compact(Math.max(...stats.perDay.map((d) => d.count)))
-                : '—'
-            }
+            label="Storage"
+            value={view ? bytes(view.bytes) : '—'}
             sub={
-              stats && stats.perDay.length
-                ? formatDay(stats.perDay.reduce((a, b) => (b.count > a.count ? b : a)).day)
+              view && view.total
+                ? `${Math.round(view.bytes / view.total / 1024)} KB average`
                 : undefined
             }
           />
           <StatTile
+            label="Busiest day"
+            value={view?.busiest ? compact(view.busiest.count) : '—'}
+            sub={view?.busiest ? formatDay(view.busiest.day) : undefined}
+          />
+          <StatTile
             label="Daily average"
-            value={stats && stats.days ? compact(Math.round(stats.total / stats.days)) : '—'}
-            sub={stats ? `across ${stats.days} days` : undefined}
+            value={view && view.days ? compact(Math.round(view.total / view.days)) : '—'}
+            sub={view ? `across ${view.days} day${view.days === 1 ? '' : 's'}` : undefined}
           />
         </section>
 
         <section className="grid gap-5 lg:grid-cols-3">
           <div className={`${card} p-5 lg:col-span-2`}>
             <h2 className="text-[15px] font-semibold text-[var(--ink)]">Recordings per day</h2>
-            <p className="mb-5 text-[13px] text-[var(--muted)]">By call date</p>
-            <DayChart data={stats?.perDay ?? []} />
+            <p className="mb-5 text-[13px] text-[var(--muted)]">
+              {group ? `${group.replace(/_/g, ' ')} only` : 'All groups'}
+            </p>
+            <DayChart
+              data={view?.perDay ?? []}
+              selected={from && from === to ? toDayNumber(from) : null}
+              onSelect={(day) => {
+                const iso = `${String(day).slice(0, 4)}-${String(day).slice(4, 6)}-${String(day).slice(6, 8)}`
+                // Clicking the selected day again clears the filter.
+                const clearing = from === iso && to === iso
+                setFrom(clearing ? '' : iso)
+                setTo(clearing ? '' : iso)
+              }}
+            />
           </div>
 
           <div className={`${card} p-5`}>
             <h2 className="text-[15px] font-semibold text-[var(--ink)]">By group</h2>
-            <p className="mb-5 text-[13px] text-[var(--muted)]">Recording count</p>
-            <GroupChart data={stats?.perGroup ?? []} />
+            <p className="mb-5 text-[13px] text-[var(--muted)]">
+              {range ?? 'All dates'}
+            </p>
+            <GroupChart data={view?.perGroup ?? []} />
           </div>
         </section>
 

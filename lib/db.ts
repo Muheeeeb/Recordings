@@ -76,6 +76,11 @@ const TABLES = [
   // The dashboard totals are aggregates over every row. They only change when
   // the indexer runs, so they are computed once and read back as a single row
   // rather than recomputed on every page load.
+  //
+  // The payload holds one entry per day *per group* rather than a flat total,
+  // which is what lets the dashboard answer "how many ACA calls on the 28th"
+  // without another query. That grid stays small — days times four — however
+  // large the recordings table gets.
   `CREATE TABLE IF NOT EXISTS stats_cache (
      id          INTEGER PRIMARY KEY CHECK (id = 1),
      payload     TEXT NOT NULL,
@@ -217,15 +222,15 @@ export async function listGroups(): Promise<string[]> {
   return result.rows.map((r) => String((r as unknown as { name: string }).name))
 }
 
+/**
+ * One row per day per group. Everything the dashboard shows — totals, the daily
+ * chart, the group breakdown — is derived from this grid, so filtering by date
+ * or group happens in the browser with no further requests.
+ */
+export type StatCell = { day: number; group: string; count: number; bytes: number }
+
 export type Stats = {
-  total: number
-  bytes: number
-  days: number
-  agents: number
-  firstDay: number | null
-  lastDay: number | null
-  perDay: { day: number; count: number; bytes: number }[]
-  perGroup: { name: string; count: number; bytes: number }[]
+  cells: StatCell[]
   perAgent: { name: string; count: number }[]
 }
 
@@ -245,7 +250,13 @@ export async function getStats(): Promise<Stats> {
     if (cached.rows.length > 0) {
       const row = cached.rows[0] as unknown as { payload: string; computed_at: number }
       if (now() - Number(row.computed_at) < STATS_TTL_SECONDS) {
-        return JSON.parse(String(row.payload)) as Stats
+        const parsed = JSON.parse(String(row.payload)) as Stats
+        // A payload written before the shape changed is discarded rather than
+        // served: the deploy that changes the shape would otherwise hand the
+        // dashboard a structure it cannot read.
+        if (Array.isArray(parsed?.cells) && Array.isArray(parsed?.perAgent)) {
+          return parsed
+        }
       }
     }
   } catch {
@@ -278,20 +289,13 @@ export async function refreshStats(): Promise<Stats> {
 }
 
 async function computeStats(): Promise<Stats> {
-  const [totals, perDay, perGroup, perAgent] = await Promise.all([
+  const [grid, perAgent] = await Promise.all([
     db().execute(
-      `SELECT count(*) AS total, sum(sz) AS bytes,
-              count(DISTINCT day) AS days, min(day) AS lo, max(day) AS hi
-       FROM recordings`
-    ),
-    db().execute(
-      `SELECT day, count(*) AS n, sum(sz) AS bytes FROM recordings
-       WHERE day IS NOT NULL GROUP BY day ORDER BY day`
-    ),
-    db().execute(
-      `SELECT g.name, count(*) AS n, sum(r.sz) AS bytes
+      `SELECT r.day AS day, g.name AS name, count(*) AS n, sum(r.sz) AS bytes
        FROM recordings r JOIN groups g ON g.id = r.g
-       GROUP BY g.name ORDER BY n DESC`
+       WHERE r.day IS NOT NULL
+       GROUP BY r.day, g.name
+       ORDER BY r.day`
     ),
     db().execute(
       `SELECT a.name, count(*) AS n FROM recordings r
@@ -299,28 +303,15 @@ async function computeStats(): Promise<Stats> {
     ),
   ])
 
-  const t = totals.rows[0] as unknown as {
-    total: number
-    bytes: number
-    days: number
-    lo: number | null
-    hi: number | null
-  }
-
   return {
-    total: Number(t.total ?? 0),
-    bytes: Number(t.bytes ?? 0),
-    days: Number(t.days ?? 0),
-    agents: perAgent.rows.length,
-    firstDay: t.lo === null ? null : Number(t.lo),
-    lastDay: t.hi === null ? null : Number(t.hi),
-    perDay: perDay.rows.map((r) => {
-      const row = r as unknown as { day: number; n: number; bytes: number }
-      return { day: Number(row.day), count: Number(row.n), bytes: Number(row.bytes ?? 0) }
-    }),
-    perGroup: perGroup.rows.map((r) => {
-      const row = r as unknown as { name: string; n: number; bytes: number }
-      return { name: String(row.name), count: Number(row.n), bytes: Number(row.bytes ?? 0) }
+    cells: grid.rows.map((r) => {
+      const row = r as unknown as { day: number; name: string; n: number; bytes: number }
+      return {
+        day: Number(row.day),
+        group: String(row.name),
+        count: Number(row.n),
+        bytes: Number(row.bytes ?? 0),
+      }
     }),
     perAgent: perAgent.rows.map((r) => {
       const row = r as unknown as { name: string; n: number }
