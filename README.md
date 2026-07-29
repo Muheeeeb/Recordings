@@ -21,18 +21,28 @@ The app never proxies audio, so playback costs no Vercel bandwidth.
 
 ## Filenames
 
+The dialer has already changed this format once, so both are in the bucket:
+
 ```
-20260726-004021_6026629_CLOSER2-all.mp3
-│        │      │       │       └ mix type
-│        │      │       └ agent
-│        │      └ lead id (a customer phone number is expected here later)
-│        └ time
-└ date
+   20260722-145445_5738740_CLOSER2-all.mp3          original
+ S_20260727-160438_6256932_MAIN_4074731824-all.mp3  current
+ │  │        │      │       │    │           └ mix type
+ │  │        │      │       │    └ customer phone number
+ │  │        │      │       └ agent
+ │  │        │      └ lead id
+ │  │        └ time
+ │  └ date
+ └ prefix added by the dialer
 ```
 
-`lib/parse.ts` identifies fields by shape rather than position, so adding the
-customer number does not break it: 6–9 digits are read as a lead id, 10–11 as a
-phone number. Both columns exist already and the search box queries both.
+`lib/parse.ts` therefore locates the timestamp by matching it rather than by
+taking the first token, and classifies everything after it by shape: 6–9 digits
+is a lead id, 10–11 is a phone number (a leading US country code is dropped),
+anything else is the agent. A further reordering or added field does not need a
+parser change; a new *shape* would.
+
+`scripts/test-parse.ts` asserts every known format and is worth extending
+whenever the dialer changes something.
 
 ## Local development
 

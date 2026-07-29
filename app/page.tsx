@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DayChart, GroupChart, StatTile, bytes, compact, formatDay } from '@/components/charts'
 import { SettingsDialog } from '@/components/settings-dialog'
+import { SyncButton } from '@/components/sync-button'
 
 type Row = {
   key: string
@@ -133,12 +134,23 @@ export default function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group, from, to])
 
-  useEffect(() => {
+  const loadStats = useCallback(() => {
     fetch('/api/stats')
       .then((r) => (r.ok ? r.json() : null))
       .then((s) => s && setStats(s))
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    loadStats()
+  }, [loadStats])
+
+  // Called when a sync finishes, so the dashboard and results pick up the new
+  // recordings without a manual reload.
+  const afterSync = useCallback(() => {
+    loadStats()
+    void runSearch({ q, group, from, to, page: 0, append: false })
+  }, [loadStats, runSearch, q, group, from, to])
 
   async function play(key: string) {
     if (playing === key) {
@@ -186,6 +198,7 @@ export default function SearchPage() {
             <span className="text-[13px] text-[var(--muted)]">poshnee</span>
           </div>
           <div className="flex items-center gap-1">
+            <SyncButton onFinished={afterSync} />
             <button
               onClick={() => setShowSettings(true)}
               className="rounded-lg px-3 py-1.5 text-[13px] text-[var(--ink-2)] hover:bg-[var(--plane)]"

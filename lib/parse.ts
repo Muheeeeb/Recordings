@@ -1,16 +1,18 @@
 /**
  * Parses VICIdial-style recording filenames into searchable fields.
  *
- * Fields are identified by SHAPE, not by position, so the parser keeps
- * working when the dialer starts adding the customer phone number.
+ * The dialer has already changed this format once — it grew an `S_` prefix and
+ * a customer phone number — so nothing here depends on a field's position:
  *
- *   20260726-004021_6026629_CLOSER2-all.mp3
- *   YYYYMMDD-HHMMSS_<numbers...>_<agent>-<mix>.<ext>
+ *     20260722-145445_5738740_CLOSER2-all.mp3
+ *   S_20260727-160438_6256932_MAIN_4074731824-all.mp3
  *
- * Numeric tokens are classified as:
- *   6-9 digits   -> lead id
- *   10-11 digits -> phone number (11 digits are normalised down from a
- *                   leading US country code)
+ * The timestamp is located by matching it rather than by taking the first
+ * token, and every token after it is classified by shape:
+ *
+ *   6-9 digits    -> lead id
+ *   10-11 digits  -> phone number (a leading US country code is dropped)
+ *   anything else -> agent
  */
 
 const STAMP = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/
@@ -54,33 +56,39 @@ export function parseRecording(key: string): Recording {
   }
 
   const tokens = stem.split('_')
-  const stamp = STAMP.exec(tokens[0] ?? '')
-  if (!stamp) return base
+  const stampIndex = tokens.findIndex((token) => STAMP.test(token))
+  if (stampIndex === -1) return base
 
+  const stamp = STAMP.exec(tokens[stampIndex])!
   const [, y, mo, d, h, mi, s] = stamp
   base.recordedAt = `${y}-${mo}-${d}T${h}:${mi}:${s}Z`
   base.parsed = true
 
-  // The agent lives in the final token, usually suffixed with the mix type
-  // (CLOSER2-all). Split on the last dash only if that tail looks like a mix.
-  const last = tokens[tokens.length - 1]
-  if (last && tokens.length > 1) {
+  const rest = tokens.slice(stampIndex + 1)
+
+  // The mix type is a suffix on the final token (…_MAIN_4074731824-all), so it
+  // is peeled off before the token is classified.
+  if (rest.length > 0) {
+    const last = rest[rest.length - 1]
     const dash = last.lastIndexOf('-')
     if (dash !== -1 && MIX.test(last.slice(dash + 1))) {
-      base.agent = last.slice(0, dash)
       base.mix = last.slice(dash + 1).toLowerCase()
-    } else {
-      base.agent = last
+      rest[rest.length - 1] = last.slice(0, dash)
     }
   }
 
-  // Everything between the timestamp and the agent is numeric metadata.
-  for (const token of tokens.slice(1, -1)) {
-    if (!DIGITS.test(token)) continue
-    if (token.length >= 10 && token.length <= 11) {
-      base.phone = token.length === 11 && token.startsWith('1') ? token.slice(1) : token
-    } else if (token.length >= 6 && token.length <= 9) {
-      base.leadId = token
+  for (const token of rest) {
+    if (!token) continue
+    if (DIGITS.test(token)) {
+      if (token.length >= 10 && token.length <= 11) {
+        base.phone = token.length === 11 && token.startsWith('1') ? token.slice(1) : token
+      } else if (token.length >= 6 && token.length <= 9) {
+        base.leadId = token
+      }
+    } else if (!base.agent) {
+      // The first non-numeric token is the agent; later ones are ignored so a
+      // stray marker cannot overwrite it.
+      base.agent = token
     }
   }
 

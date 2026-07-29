@@ -254,6 +254,17 @@ export async function getStats(): Promise<Stats> {
   return refreshStats()
 }
 
+/** When the index was last refreshed, so the UI can show how current it is. */
+export async function getIndexFreshness(): Promise<number | null> {
+  try {
+    const result = await db().execute('SELECT computed_at FROM stats_cache WHERE id = 1')
+    if (result.rows.length === 0) return null
+    return Number((result.rows[0] as unknown as { computed_at: number }).computed_at)
+  } catch {
+    return null
+  }
+}
+
 /** Recomputes the totals and stores them. Called at the end of every index run. */
 export async function refreshStats(): Promise<Stats> {
   const stats = await computeStats()
