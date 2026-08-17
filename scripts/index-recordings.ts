@@ -25,6 +25,9 @@ const BATCH = 400
 const recentArg = process.argv.find((a) => a.startsWith('--recent'))
 const RECENT = recentArg ? Number(recentArg.split('=')[1] ?? 3) : 0
 
+/** Rewrites rows that already exist. Only needed after a parser change. */
+const REWRITE = process.argv.includes('--rewrite')
+
 /** Lists the immediate child "folders" of a prefix without reading objects. */
 async function childPrefixes(s3: S3Client, prefix: string): Promise<string[]> {
   const found: string[] = []
@@ -109,12 +112,20 @@ async function flush(rows: Row[], groups: Interner, agents: Interner) {
     tuples.push('(?,?,?,?,?,?,?,?,?)')
   }
 
+  // A recording never changes once uploaded, so re-running the indexer should
+  // not rewrite rows that are already correct. Updating them anyway turned
+  // every full reconcile into a million writes and exhausted the database's
+  // write quota. --rewrite restores the old behaviour, which is only needed
+  // after a parser change alters how existing filenames are interpreted.
+  const onConflict = REWRITE
+    ? `DO UPDATE SET a = excluded.a, ts = excluded.ts, day = excluded.day,
+         lead = excluded.lead, phone = excluded.phone, sz = excluded.sz`
+    : 'DO NOTHING'
+
   await db().execute({
     sql: `INSERT INTO recordings (g, a, dir, fn, ts, day, lead, phone, sz)
           VALUES ${tuples.join(',')}
-          ON CONFLICT (g, dir, fn) DO UPDATE SET
-            a = excluded.a, ts = excluded.ts, day = excluded.day,
-            lead = excluded.lead, phone = excluded.phone, sz = excluded.sz`,
+          ON CONFLICT (g, dir, fn) ${onConflict}`,
     args,
   })
 }
