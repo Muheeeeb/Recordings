@@ -7,7 +7,7 @@ import { clientIp, isAllowed, parseAllowlist } from '@/lib/ip'
  * is the second login step — it has no session yet and guards itself with the
  * short-lived challenge cookie.
  */
-const PUBLIC_PATHS = new Set(['/login', '/api/login', '/api/verify'])
+const PUBLIC_PATHS = new Set(['/login', '/api/login', '/api/verify', '/api/health'])
 
 export async function proxy(request: NextRequest) {
   const allowlist = parseAllowlist(process.env.ALLOWED_IPS)
