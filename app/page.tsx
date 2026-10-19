@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DayChart, GroupChart, StatTile, bytes, compact, formatDay } from '@/components/charts'
 import { SettingsDialog } from '@/components/settings-dialog'
@@ -16,7 +16,13 @@ type Row = {
   size_bytes: number | null
 }
 
-type StatCell = { day: number; group: string; count: number; bytes: number }
+type StatCell = {
+  day: number
+  group: string
+  dialer: string
+  count: number
+  bytes: number
+}
 type Stats = {
   cells: StatCell[]
   perAgent: { name: string; count: number }[]
@@ -29,16 +35,36 @@ function toDayNumber(value: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+/** YYYYMMDD back to the YYYY-MM-DD a date input expects. */
+function toDateInput(day: number): string {
+  const s = String(day)
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+}
+
+/** Shifts a YYYYMMDD day by a number of days, via a real date so months wrap. */
+function shiftDay(day: number, delta: number): number {
+  const d = new Date(`${toDateInput(day)}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + delta)
+  return Number(d.toISOString().slice(0, 10).replace(/-/g, ''))
+}
+
 /**
- * Everything on the dashboard comes from the day-by-group grid, so applying a
- * date range or a group is a filter over a few dozen rows rather than another
- * trip to the database.
+ * Everything on the dashboard comes from the day/group/dialer grid, so applying
+ * a date range, a dialer or a group is a filter over a few dozen rows rather
+ * than another trip to the database.
  */
-function summarise(cells: StatCell[], group: string, from: string, to: string) {
+function summarise(
+  cells: StatCell[],
+  dialer: string,
+  group: string,
+  from: string,
+  to: string
+) {
   const lo = toDayNumber(from)
   const hi = toDayNumber(to)
   const matching = cells.filter(
     (c) =>
+      (!dialer || c.dialer === dialer) &&
       (!group || c.group === group) &&
       (lo === null || c.day >= lo) &&
       (hi === null || c.day <= hi)
@@ -46,34 +72,41 @@ function summarise(cells: StatCell[], group: string, from: string, to: string) {
 
   const byDay = new Map<number, { count: number; bytes: number }>()
   const byGroup = new Map<string, { count: number; bytes: number }>()
+  const byDialer = new Map<string, { count: number; bytes: number }>()
   let total = 0
   let bytes = 0
+
+  const bump = (
+    map: Map<string | number, { count: number; bytes: number }>,
+    key: string | number,
+    cell: StatCell
+  ) => {
+    const entry = map.get(key) ?? { count: 0, bytes: 0 }
+    entry.count += cell.count
+    entry.bytes += cell.bytes
+    map.set(key, entry)
+  }
 
   for (const cell of matching) {
     total += cell.count
     bytes += cell.bytes
-    const d = byDay.get(cell.day) ?? { count: 0, bytes: 0 }
-    d.count += cell.count
-    d.bytes += cell.bytes
-    byDay.set(cell.day, d)
-    const g = byGroup.get(cell.group) ?? { count: 0, bytes: 0 }
-    g.count += cell.count
-    g.bytes += cell.bytes
-    byGroup.set(cell.group, g)
+    bump(byDay as never, cell.day, cell)
+    bump(byGroup as never, cell.group, cell)
+    bump(byDialer as never, cell.dialer, cell)
   }
 
   const perDay = [...byDay.entries()]
     .map(([day, v]) => ({ day, ...v }))
     .sort((a, b) => a.day - b.day)
-  const perGroup = [...byGroup.entries()]
-    .map(([name, v]) => ({ name, ...v }))
-    .sort((a, b) => b.count - a.count)
+  const rank = (m: Map<string, { count: number; bytes: number }>) =>
+    [...m.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.count - a.count)
 
   return {
     total,
     bytes,
     perDay,
-    perGroup,
+    perGroup: rank(byGroup),
+    perDialer: rank(byDialer),
     days: perDay.length,
     firstDay: perDay[0]?.day ?? null,
     lastDay: perDay[perDay.length - 1]?.day ?? null,
@@ -84,12 +117,28 @@ function summarise(cells: StatCell[], group: string, from: string, to: string) {
   }
 }
 
-const GROUPS = [
-  'Closers_ACA',
-  'Closers_Medicare',
-  'Main_ACA_Fronter',
-  'Main_Medicare_Fronter',
-]
+/**
+ * Dialers and folders both come from the data rather than a fixed list: the KTN
+ * and Rockey folders appeared in the bucket on their own, and a hardcoded list
+ * would have hidden them.
+ */
+function dialersIn(cells: StatCell[]): string[] {
+  const order = ['CCS', 'KTN', 'Rockey']
+  const present = [...new Set(cells.map((c) => c.dialer))]
+  return [
+    ...order.filter((d) => present.includes(d)),
+    ...present.filter((d) => !order.includes(d)).sort(),
+  ]
+}
+
+function groupsIn(cells: StatCell[], dialer: string): string[] {
+  return [
+    ...new Set(cells.filter((c) => !dialer || c.dialer === dialer).map((c) => c.group)),
+  ].sort()
+}
+
+/** Default window: the most recent month of data that actually exists. */
+const DEFAULT_WINDOW_DAYS = 30
 
 function formatTime(seconds: number | null) {
   if (!seconds) return '—'
@@ -114,6 +163,7 @@ function formatPhone(value: number | null) {
 export default function SearchPage() {
   const router = useRouter()
   const [q, setQ] = useState('')
+  const [dialer, setDialer] = useState('')
   const [group, setGroup] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -137,6 +187,7 @@ export default function SearchPage() {
   const runSearch = useCallback(
     async (opts: {
       q: string
+      dialer: string
       group: string
       from: string
       to: string
@@ -152,6 +203,7 @@ export default function SearchPage() {
         const params = new URLSearchParams()
         const term = (opts.q ?? '').trim()
         if (term) params.set('q', term)
+        if (opts.dialer) params.set('dialer', opts.dialer)
         if (opts.group) params.set('group', opts.group)
         if (opts.from) params.set('from', opts.from)
         if (opts.to) params.set('to', opts.to)
@@ -184,11 +236,11 @@ export default function SearchPage() {
   // one request — and keeps the effect free of a synchronous setState.
   useEffect(() => {
     const timer = setTimeout(() => {
-      void runSearch({ q, group, from, to, page: 0, append: false })
+      void runSearch({ q, dialer, group, from, to, page: 0, append: false })
     }, 150)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group, from, to])
+  }, [dialer, group, from, to])
 
   const loadStats = useCallback(() => {
     fetch('/api/stats')
@@ -201,12 +253,25 @@ export default function SearchPage() {
     loadStats()
   }, [loadStats])
 
+  // The bucket now holds months of recordings, so showing everything by default
+  // buries the current picture. The window is anchored to the newest day that
+  // actually has data rather than to today, because uploads arrive a day or two
+  // late and anchoring on today would open on a partly empty range.
+  const defaultsApplied = useRef(false)
+  useEffect(() => {
+    if (defaultsApplied.current || !stats || stats.cells.length === 0) return
+    defaultsApplied.current = true
+    const newest = Math.max(...stats.cells.map((c) => c.day))
+    setFrom(toDateInput(shiftDay(newest, -(DEFAULT_WINDOW_DAYS - 1))))
+    setTo(toDateInput(newest))
+  }, [stats])
+
   // Called when a sync finishes, so the dashboard and results pick up the new
   // recordings without a manual reload.
   const afterSync = useCallback(() => {
     loadStats()
-    void runSearch({ q, group, from, to, page: 0, append: false })
-  }, [loadStats, runSearch, q, group, from, to])
+    void runSearch({ q, dialer, group, from, to, page: 0, append: false })
+  }, [loadStats, runSearch, q, dialer, group, from, to])
 
   async function play(key: string) {
     if (playing === key) {
@@ -242,7 +307,9 @@ export default function SearchPage() {
 
   // Recomputed as the filters change; the grid it reads is only a few dozen
   // rows, so this is cheaper than asking the server again.
-  const view = stats ? summarise(stats.cells, group, from, to) : null
+  const view = stats ? summarise(stats.cells, dialer, group, from, to) : null
+  const availableDialers = stats ? dialersIn(stats.cells) : []
+  const availableGroups = stats ? groupsIn(stats.cells, dialer) : []
 
   const range =
     view?.firstDay && view?.lastDay
@@ -251,7 +318,7 @@ export default function SearchPage() {
         : `${formatDay(view.firstDay)} – ${formatDay(view.lastDay)}`
       : undefined
 
-  const filtered = Boolean(group || from || to)
+  const filtered = Boolean(dialer || group || from || to)
 
   return (
     <main className="min-h-screen bg-[var(--plane)]">
@@ -284,9 +351,10 @@ export default function SearchPage() {
         {filtered && (
           <p className="text-[13px] text-[var(--muted)]">
             Showing{' '}
-            <span className="text-[var(--ink)]">
-              {group ? group.replace(/_/g, ' ') : 'all groups'}
-            </span>
+            <span className="text-[var(--ink)]">{dialer || 'all dialers'}</span>
+            {group ? (
+              <> · <span className="text-[var(--ink)]">{group.replace(/_/g, ' ')}</span></>
+            ) : null}
             {range ? <> · <span className="text-[var(--ink)]">{range}</span></> : null}
           </p>
         )}
@@ -338,12 +406,20 @@ export default function SearchPage() {
             />
           </div>
 
-          <div className={`${card} p-5`}>
-            <h2 className="text-[15px] font-semibold text-[var(--ink)]">By group</h2>
-            <p className="mb-5 text-[13px] text-[var(--muted)]">
-              {range ?? 'All dates'}
-            </p>
-            <GroupChart data={view?.perGroup ?? []} />
+          <div className="space-y-5">
+            <div className={`${card} p-5`}>
+              <h2 className="text-[15px] font-semibold text-[var(--ink)]">By dialer</h2>
+              <p className="mb-5 text-[13px] text-[var(--muted)]">{range ?? 'All dates'}</p>
+              <GroupChart data={view?.perDialer ?? []} />
+            </div>
+
+            <div className={`${card} p-5`}>
+              <h2 className="text-[15px] font-semibold text-[var(--ink)]">By folder</h2>
+              <p className="mb-5 text-[13px] text-[var(--muted)]">
+                {dialer ? `${dialer} only` : 'All dialers'}
+              </p>
+              <GroupChart data={view?.perGroup ?? []} />
+            </div>
           </div>
         </section>
 
@@ -352,7 +428,7 @@ export default function SearchPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault()
-              void runSearch({ q, group, from, to, page: 0, append: false })
+              void runSearch({ q, dialer, group, from, to, page: 0, append: false })
             }}
           >
             <div className="flex gap-2">
@@ -372,12 +448,29 @@ export default function SearchPage() {
 
             <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
               <select
+                value={dialer}
+                onChange={(e) => {
+                  setDialer(e.target.value)
+                  // The chosen folder may not belong to the new dialer, which
+                  // would silently return nothing.
+                  setGroup('')
+                }}
+                className={control}
+              >
+                <option value="">All dialers</option>
+                {availableDialers.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+              <select
                 value={group}
                 onChange={(e) => setGroup(e.target.value)}
                 className={control}
               >
-                <option value="">All groups</option>
-                {GROUPS.map((g) => (
+                <option value="">{dialer ? `All ${dialer} folders` : 'All folders'}</option>
+                {availableGroups.map((g) => (
                   <option key={g} value={g}>
                     {g.replace(/_/g, ' ')}
                   </option>
@@ -400,12 +493,13 @@ export default function SearchPage() {
                 type="button"
                 onClick={() => {
                   setQ('')
+                  setDialer('')
                   setGroup('')
                   setFrom('')
                   setTo('')
                   // Clearing only the text box would not change any effect
                   // dependency, so search again explicitly.
-                  void runSearch({ q: '', group: '', from: '', to: '', page: 0, append: false })
+                  void runSearch({ q: '', dialer: '', group: '', from: '', to: '', page: 0, append: false })
                 }}
                 className="text-[var(--muted)] hover:text-[var(--ink)]"
               >
@@ -480,7 +574,7 @@ export default function SearchPage() {
 
         {hasMore && (
           <button
-            onClick={() => runSearch({ q, group, from, to, page: page + 1, append: true })}
+            onClick={() => runSearch({ q, dialer, group, from, to, page: page + 1, append: true })}
             disabled={loading}
             className="mx-auto block rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-5 py-2 text-sm text-[var(--ink-2)] hover:opacity-90 disabled:opacity-50"
           >

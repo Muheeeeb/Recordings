@@ -18,6 +18,7 @@ export async function GET(request: Request) {
     const rows = await searchRecordings({
       q: params.get('q') || undefined,
       group: params.get('group') || undefined,
+      dialer: params.get('dialer') || undefined,
       from: toUnix(params.get('from')),
       to: toUnix(params.get('to'), true),
       limit,

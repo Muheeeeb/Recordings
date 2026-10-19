@@ -1,4 +1,5 @@
 import { createClient, type Client } from '@libsql/client'
+import { dialerForGroup } from './dialers'
 
 /**
  * Turso (SQLite) index over the recordings in S3.
@@ -137,6 +138,7 @@ export async function ensureSchema() {
 export type SearchParams = {
   q?: string
   group?: string
+  dialer?: string
   from?: number
   to?: number
   limit?: number
@@ -165,6 +167,30 @@ export async function searchRecordings(params: SearchParams): Promise<SearchRow[
   const digits = term.replace(/\D/g, '')
   const numeric = digits.length >= 4 && digits.length === term.replace(/[\s()+-]/g, '').length
 
+  const args: Record<string, string | number | null> = {
+    group: params.group ?? null,
+    from: params.from ?? null,
+    to: params.to ?? null,
+    term: term || null,
+    num: numeric ? Number(digits) : null,
+    like: term ? `%${term}%` : null,
+    limit,
+    offset,
+  }
+
+  // A dialer spans several folders, so it is resolved to the group names it
+  // owns. The groups table holds a handful of rows, so this costs nothing.
+  let dialerClause = ''
+  if (params.dialer) {
+    const owned = (await listGroups()).filter((g) => dialerForGroup(g) === params.dialer)
+    if (owned.length === 0) return []
+    const placeholders = owned.map((name, i) => {
+      args[`d${i}`] = name
+      return `:d${i}`
+    })
+    dialerClause = `AND g.name IN (${placeholders.join(', ')})`
+  }
+
   const result = await db().execute({
     sql: `
       SELECT g.name AS group_name, a.name AS agent, r.dir, r.fn,
@@ -173,6 +199,7 @@ export async function searchRecordings(params: SearchParams): Promise<SearchRow[
       JOIN groups g ON g.id = r.g
       LEFT JOIN agents a ON a.id = r.a
       WHERE (:group IS NULL OR g.name = :group)
+        ${dialerClause}
         AND (:from  IS NULL OR r.ts >= :from)
         AND (:to    IS NULL OR r.ts <= :to)
         AND (
@@ -182,16 +209,7 @@ export async function searchRecordings(params: SearchParams): Promise<SearchRow[
         )
       ORDER BY r.ts DESC
       LIMIT :limit OFFSET :offset`,
-    args: {
-      group: params.group ?? null,
-      from: params.from ?? null,
-      to: params.to ?? null,
-      term: term || null,
-      num: numeric ? Number(digits) : null,
-      like: term ? `%${term}%` : null,
-      limit,
-      offset,
-    },
+    args,
   })
 
   return result.rows.map((row) => {
@@ -227,7 +245,13 @@ export async function listGroups(): Promise<string[]> {
  * chart, the group breakdown — is derived from this grid, so filtering by date
  * or group happens in the browser with no further requests.
  */
-export type StatCell = { day: number; group: string; count: number; bytes: number }
+export type StatCell = {
+  day: number
+  group: string
+  dialer: string
+  count: number
+  bytes: number
+}
 
 export type Stats = {
   cells: StatCell[]
@@ -254,9 +278,14 @@ export async function getStats(): Promise<Stats> {
         // A payload written before the shape changed is discarded rather than
         // served: the deploy that changes the shape would otherwise hand the
         // dashboard a structure it cannot read.
-        if (Array.isArray(parsed?.cells) && Array.isArray(parsed?.perAgent)) {
-          return parsed
-        }
+        // The field check matters as much as the array check: a payload
+        // written before `dialer` existed is still shaped like cells, and
+        // serving it would leave every row without a dialer.
+        const usable =
+          Array.isArray(parsed?.cells) &&
+          Array.isArray(parsed?.perAgent) &&
+          (parsed.cells.length === 0 || typeof parsed.cells[0]?.dialer === 'string')
+        if (usable) return parsed
       }
     }
   } catch {
@@ -306,9 +335,13 @@ async function computeStats(): Promise<Stats> {
   return {
     cells: grid.rows.map((r) => {
       const row = r as unknown as { day: number; name: string; n: number; bytes: number }
+      const group = String(row.name)
       return {
         day: Number(row.day),
-        group: String(row.name),
+        group,
+        // Resolved here rather than stored, so re-mapping a folder to a
+        // different dialer is a code change and not a reindex.
+        dialer: dialerForGroup(group),
         count: Number(row.n),
         bytes: Number(row.bytes ?? 0),
       }
