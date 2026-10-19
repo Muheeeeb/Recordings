@@ -42,9 +42,11 @@ jobs:
           if [ "$(date -u +%u)" = "7" ] || [ "${{ inputs.full }}" = "true" ]; then
             echo "args=" >> "$GITHUB_OUTPUT"
             echo "mode=full reconcile" >> "$GITHUB_OUTPUT"
+            echo "prune=yes" >> "$GITHUB_OUTPUT"
           else
             echo "args=--recent=2" >> "$GITHUB_OUTPUT"
             echo "mode=incremental (newest 2 folders per group)" >> "$GITHUB_OUTPUT"
+            echo "prune=no" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Index
@@ -62,6 +64,23 @@ jobs:
           set -o pipefail
           npx tsx scripts/index-recordings.ts ${{ steps.scope.outputs.args }} | tee run.log
 
+      # Expired recordings are only detectable on a pass that sees every
+      # folder. An incremental run looks at the newest folders alone, so what
+      # it cannot see would look like it had been deleted.
+      - name: Prune recordings deleted from S3
+        if: steps.scope.outputs.prune == 'yes'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ap-south-1
+          S3_BUCKET: poshnee-call-recordings
+          S3_PREFIX: dialer/
+        run: |
+          set -o pipefail
+          npx tsx scripts/prune-index.ts --apply | tee prune.log
+
       # Makes the Actions page show what happened without opening the log.
       - name: Summary
         if: always()
@@ -75,5 +94,12 @@ jobs:
               echo '```'
             else
               echo "The indexer produced no output — the run failed before it started."
+            fi
+            if [ -f prune.log ]; then
+              echo ""
+              echo "#### Pruned"
+              echo '```'
+              tail -n 8 prune.log
+              echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
