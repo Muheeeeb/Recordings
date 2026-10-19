@@ -171,16 +171,24 @@ export function DayChart({
         </div>
       </div>
 
+      {/* Only every nth date is labelled. Printing one per bar turns the axis
+          into an unreadable smear once a range covers more than a fortnight,
+          and the tooltip carries the exact day anyway. The last bar always
+          keeps its label so the range end is never guessed at. */}
       <div className="mt-2 flex pl-12">
-        {data.map((d) => (
-          <div
-            key={d.day}
-            className="text-center text-[11px] text-[var(--muted)]"
-            style={{ width: `${slot}%` }}
-          >
-            {formatDay(d.day)}
-          </div>
-        ))}
+        {data.map((d, i) => {
+          const step = Math.ceil(data.length / 10)
+          const show = i === data.length - 1 || (data.length - 1 - i) % step === 0
+          return (
+            <div
+              key={d.day}
+              className="text-center text-[11px] whitespace-nowrap text-[var(--muted)]"
+              style={{ width: `${slot}%` }}
+            >
+              {show ? formatDay(d.day) : ' '}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

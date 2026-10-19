@@ -500,10 +500,15 @@ export default function SearchPage() {
               selected={from && from === to ? toDayNumber(from) : null}
               onSelect={(day) => {
                 const iso = toDateInput(day)
-                // Clicking the selected day again clears the filter.
-                const clearing = from === iso && to === iso
-                setFrom(clearing ? '' : iso)
-                setTo(clearing ? '' : iso)
+                // Deselecting a day returns to the default window rather than
+                // to all-time: dropping someone into every day on record is a
+                // jarring place to land from a single-day view.
+                if (from === iso && to === iso) {
+                  applyRange(DEFAULT_WINDOW_DAYS)
+                } else {
+                  setFrom(iso)
+                  setTo(iso)
+                }
               }}
             />
           </div>
