@@ -32,6 +32,12 @@ const cases: { key: string; expect: Partial<Record<'leadId' | 'phone' | 'agent' 
     key: 'dialer/Closers_ACA/20260726/20260726-090000_6026631_CLOSER2.mp3',
     expect: { leadId: '6026631', agent: 'CLOSER2' },
   },
+  // Rockey also writes the timestamp without a dash. These were rejected
+  // outright before, so the recordings never reached the index at all.
+  {
+    key: 'dialer/Rockey_Dialer/20260508115740_202_8416613235161837-all.mp3',
+    expect: { mix: 'all' },
+  },
   // Phone number but no lead id.
   {
     key: 'dialer/Closers_Medicare/20260726/S_20260726-113000_CLOSER7_3055559876-all.mp3',

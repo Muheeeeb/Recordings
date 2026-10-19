@@ -15,7 +15,16 @@
  *   anything else -> agent
  */
 
+/**
+ * Two timestamp spellings are in the bucket. Most folders use a dash between
+ * the date and the time; some Rockey recordings run the two together. The
+ * dashless form is matched second so a 14-digit token is never mistaken for
+ * some other number.
+ */
 const STAMP = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/
+const STAMP_COMPACT = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/
+const matchStamp = (token: string) => STAMP.exec(token) ?? STAMP_COMPACT.exec(token)
+
 const DIGITS = /^\d+$/
 const MIX = /^(all|in|out|both|mix)$/i
 
@@ -56,10 +65,10 @@ export function parseRecording(key: string): Recording {
   }
 
   const tokens = stem.split('_')
-  const stampIndex = tokens.findIndex((token) => STAMP.test(token))
+  const stampIndex = tokens.findIndex((token) => matchStamp(token) !== null)
   if (stampIndex === -1) return base
 
-  const stamp = STAMP.exec(tokens[stampIndex])!
+  const stamp = matchStamp(tokens[stampIndex])!
   const [, y, mo, d, h, mi, s] = stamp
   base.recordedAt = `${y}-${mo}-${d}T${h}:${mi}:${s}Z`
   base.parsed = true
