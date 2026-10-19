@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { DayChart, GroupChart, StatTile, bytes, compact, formatDay } from '@/components/charts'
+import { DayChart, StatTile, bytes, compact, formatDay } from '@/components/charts'
+import { DialerBreakdown } from '@/components/dialer-breakdown'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { SyncButton } from '@/components/sync-button'
 
@@ -310,6 +311,29 @@ export default function SearchPage() {
   const view = stats ? summarise(stats.cells, dialer, group, from, to) : null
   const availableDialers = stats ? dialersIn(stats.cells) : []
   const availableGroups = stats ? groupsIn(stats.cells, dialer) : []
+  const groupDialerOf = (name: string) =>
+    stats?.cells.find((c) => c.group === name)?.dialer ?? ''
+  const newestDay = stats && stats.cells.length
+    ? Math.max(...stats.cells.map((c) => c.day))
+    : null
+
+  /** Range presets are anchored to the newest day with data, not to today. */
+  function applyRange(days: number | null) {
+    if (days === null || newestDay === null) {
+      setFrom('')
+      setTo('')
+      return
+    }
+    setFrom(toDateInput(shiftDay(newestDay, -(days - 1))))
+    setTo(toDateInput(newestDay))
+  }
+
+  const activeRangeDays =
+    newestDay && to === toDateInput(newestDay) && from
+      ? Math.round(
+          (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000
+        ) + 1
+      : null
 
   const range =
     view?.firstDay && view?.lastDay
@@ -347,21 +371,99 @@ export default function SearchPage() {
       </header>
 
       <div className="mx-auto max-w-6xl space-y-5 px-4 py-6">
-        {/* Dashboard ------------------------------------------------------ */}
-        {filtered && (
-          <p className="text-[13px] text-[var(--muted)]">
-            Showing{' '}
-            <span className="text-[var(--ink)]">{dialer || 'all dialers'}</span>
-            {group ? (
-              <> · <span className="text-[var(--ink)]">{group.replace(/_/g, ' ')}</span></>
-            ) : null}
-            {range ? <> · <span className="text-[var(--ink)]">{range}</span></> : null}
-          </p>
-        )}
+        {/* Filters — placed above everything they control ---------------- */}
+        <section className={`${card} p-4`}>
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <select
+              value={dialer}
+              onChange={(e) => {
+                setDialer(e.target.value)
+                // The chosen folder may not belong to the new dialer, which
+                // would silently return nothing.
+                setGroup('')
+              }}
+              className={control}
+            >
+              <option value="">All dialers</option>
+              {availableDialers.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+
+            <select value={group} onChange={(e) => setGroup(e.target.value)} className={control}>
+              <option value="">{dialer ? `All ${dialer} folders` : 'All folders'}</option>
+              {availableGroups.map((g) => (
+                <option key={g} value={g}>{g.replace(/_/g, ' ')}</option>
+              ))}
+            </select>
+
+            <span className="mx-1 h-5 w-px bg-[var(--hairline)]" />
+
+            <div className="flex overflow-hidden rounded-lg border border-[var(--hairline)]">
+              {[
+                { label: '7 days', days: 7 },
+                { label: '30 days', days: 30 },
+                { label: 'All', days: null },
+              ].map((preset) => {
+                const on =
+                  preset.days === null ? !from && !to : activeRangeDays === preset.days
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => applyRange(preset.days)}
+                    className={`px-3 py-1.5 ${
+                      on
+                        ? 'bg-[var(--ink)] text-[var(--surface)]'
+                        : 'text-[var(--ink-2)] hover:bg-[var(--plane)]'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className={control}
+            />
+            <span className="text-[var(--muted)]">to</span>
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className={control}
+            />
+
+            {filtered && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQ('')
+                  setDialer('')
+                  setGroup('')
+                  applyRange(DEFAULT_WINDOW_DAYS)
+                }}
+                className="text-[var(--muted)] hover:text-[var(--ink)]"
+              >
+                Reset
+              </button>
+            )}
+
+            <span className="ml-auto text-[var(--muted)]">
+              {dialer || 'All dialers'}
+              {group ? ` · ${group.replace(/_/g, ' ')}` : ''}
+              {range ? ` · ${range}` : ''}
+            </span>
+          </div>
+        </section>
 
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile
-            label={filtered ? 'Recordings in range' : 'Total recordings'}
+            label="Recordings"
             value={view ? view.total.toLocaleString() : '—'}
             sub={range}
             hero
@@ -391,13 +493,13 @@ export default function SearchPage() {
           <div className={`${card} p-5 lg:col-span-2`}>
             <h2 className="text-[15px] font-semibold text-[var(--ink)]">Recordings per day</h2>
             <p className="mb-5 text-[13px] text-[var(--muted)]">
-              {group ? `${group.replace(/_/g, ' ')} only` : 'All groups'}
+              {group ? group.replace(/_/g, ' ') : dialer || 'All dialers'} · click a bar to filter
             </p>
             <DayChart
               data={view?.perDay ?? []}
               selected={from && from === to ? toDayNumber(from) : null}
               onSelect={(day) => {
-                const iso = `${String(day).slice(0, 4)}-${String(day).slice(4, 6)}-${String(day).slice(6, 8)}`
+                const iso = toDateInput(day)
                 // Clicking the selected day again clears the filter.
                 const clearing = from === iso && to === iso
                 setFrom(clearing ? '' : iso)
@@ -406,20 +508,23 @@ export default function SearchPage() {
             />
           </div>
 
-          <div className="space-y-5">
-            <div className={`${card} p-5`}>
-              <h2 className="text-[15px] font-semibold text-[var(--ink)]">By dialer</h2>
-              <p className="mb-5 text-[13px] text-[var(--muted)]">{range ?? 'All dates'}</p>
-              <GroupChart data={view?.perDialer ?? []} />
-            </div>
-
-            <div className={`${card} p-5`}>
-              <h2 className="text-[15px] font-semibold text-[var(--ink)]">By folder</h2>
-              <p className="mb-5 text-[13px] text-[var(--muted)]">
-                {dialer ? `${dialer} only` : 'All dialers'}
-              </p>
-              <GroupChart data={view?.perGroup ?? []} />
-            </div>
+          <div className={`${card} p-5`}>
+            <h2 className="text-[15px] font-semibold text-[var(--ink)]">Dialers</h2>
+            <p className="mb-5 text-[13px] text-[var(--muted)]">
+              {range ?? 'All dates'} · click to filter
+            </p>
+            <DialerBreakdown
+              dialers={view?.perDialer ?? []}
+              groups={view?.perGroup ?? []}
+              groupDialer={groupDialerOf}
+              activeDialer={dialer}
+              activeGroup={group}
+              onPickDialer={(d) => {
+                setDialer(d)
+                setGroup('')
+              }}
+              onPickGroup={setGroup}
+            />
           </div>
         </section>
 
@@ -446,66 +551,6 @@ export default function SearchPage() {
               </button>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
-              <select
-                value={dialer}
-                onChange={(e) => {
-                  setDialer(e.target.value)
-                  // The chosen folder may not belong to the new dialer, which
-                  // would silently return nothing.
-                  setGroup('')
-                }}
-                className={control}
-              >
-                <option value="">All dialers</option>
-                {availableDialers.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={group}
-                onChange={(e) => setGroup(e.target.value)}
-                className={control}
-              >
-                <option value="">{dialer ? `All ${dialer} folders` : 'All folders'}</option>
-                {availableGroups.map((g) => (
-                  <option key={g} value={g}>
-                    {g.replace(/_/g, ' ')}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className={control}
-              />
-              <span className="text-[var(--muted)]">to</span>
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className={control}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  setQ('')
-                  setDialer('')
-                  setGroup('')
-                  setFrom('')
-                  setTo('')
-                  // Clearing only the text box would not change any effect
-                  // dependency, so search again explicitly.
-                  void runSearch({ q: '', dialer: '', group: '', from: '', to: '', page: 0, append: false })
-                }}
-                className="text-[var(--muted)] hover:text-[var(--ink)]"
-              >
-                Clear
-              </button>
-            </div>
           </form>
         </section>
 
