@@ -21,7 +21,11 @@ const MAP = new Map<string, Dialer>(
     [
       ['Closers_ACA', 'CCS'],
       ['Closers_Medicare', 'CCS'],
+      // Main_ACA_Fronter was retired after its contents expired; ACA_Fronter
+      // replaces it. The old name stays mapped so historical rows keep their
+      // dialer if any are ever restored from versions.
       ['Main_ACA_Fronter', 'CCS'],
+      ['ACA_Fronter', 'CCS'],
       ['Main_Medicare_Fronter', 'CCS'],
       ['KTN_Group', 'KTN'],
       ['Rockey_Dialer', 'Rockey'],
