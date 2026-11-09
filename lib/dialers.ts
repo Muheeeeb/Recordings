@@ -8,7 +8,7 @@
  * changed naming on us before.
  */
 
-export const DIALERS = ['CCS', 'KTN', 'Rockey'] as const
+export const DIALERS = ['CCS', 'KTN', 'Rockey', 'Morpheus'] as const
 export type Dialer = (typeof DIALERS)[number] | 'Other'
 
 /** Anything not listed falls here rather than disappearing from the UI. */
@@ -29,6 +29,16 @@ const MAP = new Map<string, Dialer>(
       ['Main_Medicare_Fronter', 'CCS'],
       ['KTN_Group', 'KTN'],
       ['Rockey_Dialer', 'Rockey'],
+      // Morpheus splits each product into fronter, closer and self verifier.
+      // The campaigns are separate top-level folders rather than nested under
+      // a Morpheus folder, because the group is read from one path segment —
+      // nesting would collapse all six into a single group.
+      ['Morpheus_ACA_Fronter', 'Morpheus'],
+      ['Morpheus_ACA_Closer', 'Morpheus'],
+      ['Morpheus_ACA_SelfVerifier', 'Morpheus'],
+      ['Morpheus_Medicare_Fronter', 'Morpheus'],
+      ['Morpheus_Medicare_Closer', 'Morpheus'],
+      ['Morpheus_Medicare_SelfVerifier', 'Morpheus'],
     ] as [string, Dialer][]
   ).map(([group, dialer]) => [normalise(group), dialer])
 )

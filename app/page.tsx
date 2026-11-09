@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DayChart, StatTile, bytes, compact, formatDay } from '@/components/charts'
 import { DialerBreakdown } from '@/components/dialer-breakdown'
+import { DIALERS } from '@/lib/dialers'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { SyncButton } from '@/components/sync-button'
 
@@ -124,7 +125,9 @@ function summarise(
  * would have hidden them.
  */
 function dialersIn(cells: StatCell[]): string[] {
-  const order = ['CCS', 'KTN', 'Rockey']
+  // Taken from the mapping rather than repeated here: a dialer added in
+  // one place and missed in the other would sort as if unknown.
+  const order: readonly string[] = DIALERS
   const present = [...new Set(cells.map((c) => c.dialer))]
   return [
     ...order.filter((d) => present.includes(d)),
