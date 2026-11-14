@@ -29,17 +29,15 @@ const MAP = new Map<string, Dialer>(
       ['Main_Medicare_Fronter', 'CCS'],
       ['KTN_Group', 'KTN'],
       ['Rockey_Dialer', 'Rockey'],
-      // One folder per campaign the Morpheus API actually reports. An earlier
-      // ACA/Medicare split was dropped: the API exposes no product on a
-      // recording, so there is nothing to sort those calls by.
+      // One folder per campaign worth keeping. An earlier ACA/Medicare split
+      // was dropped because the API exposes no product on a recording, so
+      // there was nothing to sort those calls by.
       //
-      // Unassigned catches recordings whose campaign comes back blank — about
-      // 9% of them — so they stay searchable instead of being dropped.
+      // Only these three are imported. Recordings on the bots campaign, and
+      // those whose campaign comes back blank, are deliberately skipped.
       ['Morpheus_Fronter', 'Morpheus'],
       ['Morpheus_Closer', 'Morpheus'],
       ['Morpheus_Closer2', 'Morpheus'],
-      ['Morpheus_Bots_Campaign', 'Morpheus'],
-      ['Morpheus_Unassigned', 'Morpheus'],
     ] as [string, Dialer][]
   ).map(([group, dialer]) => [normalise(group), dialer])
 )
