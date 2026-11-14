@@ -29,16 +29,17 @@ const MAP = new Map<string, Dialer>(
       ['Main_Medicare_Fronter', 'CCS'],
       ['KTN_Group', 'KTN'],
       ['Rockey_Dialer', 'Rockey'],
-      // Morpheus splits each product into fronter, closer and self verifier.
-      // The campaigns are separate top-level folders rather than nested under
-      // a Morpheus folder, because the group is read from one path segment —
-      // nesting would collapse all six into a single group.
-      ['Morpheus_ACA_Fronter', 'Morpheus'],
-      ['Morpheus_ACA_Closer', 'Morpheus'],
-      ['Morpheus_ACA_SelfVerifier', 'Morpheus'],
-      ['Morpheus_Medicare_Fronter', 'Morpheus'],
-      ['Morpheus_Medicare_Closer', 'Morpheus'],
-      ['Morpheus_Medicare_SelfVerifier', 'Morpheus'],
+      // One folder per campaign the Morpheus API actually reports. An earlier
+      // ACA/Medicare split was dropped: the API exposes no product on a
+      // recording, so there is nothing to sort those calls by.
+      //
+      // Unassigned catches recordings whose campaign comes back blank — about
+      // 9% of them — so they stay searchable instead of being dropped.
+      ['Morpheus_Fronter', 'Morpheus'],
+      ['Morpheus_Closer', 'Morpheus'],
+      ['Morpheus_Closer2', 'Morpheus'],
+      ['Morpheus_Bots_Campaign', 'Morpheus'],
+      ['Morpheus_Unassigned', 'Morpheus'],
     ] as [string, Dialer][]
   ).map(([group, dialer]) => [normalise(group), dialer])
 )
