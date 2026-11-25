@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-import { SESSION_COOKIE, readSession } from '@/lib/auth'
+import { requireAdmin } from '@/lib/guard'
 import { getIndexFreshness } from '@/lib/db'
 
 /**
@@ -25,8 +24,13 @@ function headers(token: string) {
   }
 }
 
+/**
+ * Admin only: this triggers the indexer workflow, which is not something a
+ * reviewer should be able to start.
+ */
 async function requireSession() {
-  return readSession((await cookies()).get(SESSION_COOKIE)?.value)
+  const guard = await requireAdmin()
+  return guard.ok ? guard.username : null
 }
 
 type Run = {

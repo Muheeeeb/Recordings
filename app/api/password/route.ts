@@ -50,7 +50,12 @@ export async function POST(request: Request) {
   await setPassword(session, await hashPassword(next))
 
   // Issue a fresh session so the change invalidates nothing the user is doing.
+  // The role comes from the account as it stands, not from the old cookie.
   const response = NextResponse.json({ ok: true })
-  response.cookies.set(SESSION_COOKIE, await createSession(session), sessionCookieOptions)
+  response.cookies.set(
+    SESSION_COOKIE,
+    await createSession(session, user.role),
+    sessionCookieOptions
+  )
   return response
 }

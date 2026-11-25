@@ -10,6 +10,8 @@ import {
   verifyAnswer,
 } from '@/lib/auth'
 import { checkThrottle, clearFailures, getSecurityChallenge, recordFailure } from '@/lib/db'
+import { currentRole } from '@/lib/users'
+import { logActivity } from '@/lib/activity'
 import { clientIp } from '@/lib/ip'
 
 const FAILURE_DELAY_MS = 700
@@ -64,8 +66,25 @@ export async function POST(request: Request) {
     }
 
     await clearFailures(ip)
-    const response = NextResponse.json({ ok: true })
-    response.cookies.set(SESSION_COOKIE, await createSession(username), sessionCookieOptions)
+
+    // The role is read here rather than carried from the password step: the
+    // challenge cookie holds only a username, and an account disabled between
+    // the two steps must not complete the login.
+    const role = await currentRole(username)
+    if (!role) {
+      return NextResponse.json({ error: 'This account is no longer active' }, { status: 403 })
+    }
+
+    await logActivity({
+      username,
+      role,
+      action: 'login',
+      ip,
+      ua: request.headers.get('user-agent'),
+    })
+
+    const response = NextResponse.json({ ok: true, role })
+    response.cookies.set(SESSION_COOKIE, await createSession(username, role), sessionCookieOptions)
     response.cookies.set(CHALLENGE_COOKIE, '', { ...challengeCookieOptions, maxAge: 0 })
     return response
   } catch (error) {

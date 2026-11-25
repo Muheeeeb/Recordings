@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { SESSION_COOKIE, readSession } from '@/lib/auth'
+import { currentRole, getUserGroups } from '@/lib/users'
 import { clientIp, isAllowed, parseAllowlist } from '@/lib/ip'
 
 /**
@@ -13,11 +14,19 @@ export async function GET(request: Request) {
   const session = await readSession((await cookies()).get(SESSION_COOKIE)?.value)
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // The live role, not the cookie's claim, so the UI shows what the account can
+  // actually do right now.
+  const role = await currentRole(session)
+  const groups = role === 'qa' ? await getUserGroups(session) : null
+
   const ip = clientIp(request.headers)
   const allowlist = parseAllowlist(process.env.ALLOWED_IPS)
   const ipv6 = ip !== null && ip.includes(':')
 
   return NextResponse.json({
+    username: session,
+    role,
+    groups,
     yourIp: ip,
     isIPv6: ipv6,
     allowlist,

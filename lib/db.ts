@@ -86,6 +86,54 @@ const TABLES = [
      id          INTEGER PRIMARY KEY CHECK (id = 1),
      payload     TEXT NOT NULL,
      computed_at INTEGER NOT NULL)`,
+  /**
+   * A permanent, human-typeable handle on one recording.
+   *
+   * The QA portal never shows a filename or an S3 key, because both contain the
+   * customer's phone number. QA refers to a recording by its serial and writes
+   * that serial on the report; the admin pastes it back to find the real call.
+   *
+   * AUTOINCREMENT is the point of this table. Without it SQLite reuses the
+   * rowid of a deleted row, so a serial written on last month's report could
+   * later resolve to a different call — and prune-index.ts does delete rows,
+   * so that is not theoretical. AUTOINCREMENT never reissues a value.
+   *
+   * Identity is (g, dir, fn), the same triple recordingExists() uses, so a
+   * recording that is pruned and later re-indexed keeps its original serial.
+   */
+  `CREATE TABLE IF NOT EXISTS serials (
+     serial    INTEGER PRIMARY KEY AUTOINCREMENT,
+     g         INTEGER NOT NULL,
+     dir       TEXT NOT NULL,
+     fn        TEXT NOT NULL,
+     issued_at INTEGER NOT NULL,
+     UNIQUE (g, dir, fn))`,
+  /**
+   * Who did what. The previous audit trail was a console.info line, which on
+   * Vercel is gone within days — no use at all for answering "who listened to
+   * this call three weeks ago".
+   */
+  `CREATE TABLE IF NOT EXISTS activity (
+     id       INTEGER PRIMARY KEY AUTOINCREMENT,
+     ts       INTEGER NOT NULL,
+     username TEXT NOT NULL,
+     role     TEXT,
+     action   TEXT NOT NULL,
+     serial   INTEGER,
+     detail   TEXT,
+     ip       TEXT,
+     ua       TEXT)`,
+  /**
+   * Which groups a QA user may review, managed by the admin.
+   *
+   * Deliberately fail-closed: a QA account with no row here sees nothing. A new
+   * account is therefore useless until someone grants it something, which is
+   * the safe direction for an account that exists to look at customer calls.
+   */
+  `CREATE TABLE IF NOT EXISTS user_groups (
+     username TEXT NOT NULL,
+     g        INTEGER NOT NULL,
+     PRIMARY KEY (username, g))`,
 ]
 
 const INDEXES = [
@@ -98,6 +146,11 @@ const INDEXES = [
   // The dashboard groups by calendar day; without a stored day the planner has
   // to compute strftime() over every row on each load.
   `CREATE INDEX IF NOT EXISTS i_day   ON recordings (day)`,
+  // The activity page reads newest-first, and "everything this user did" is
+  // the other question it answers.
+  `CREATE INDEX IF NOT EXISTS i_act_ts   ON activity (ts DESC)`,
+  `CREATE INDEX IF NOT EXISTS i_act_user ON activity (username, ts DESC)`,
+  `CREATE INDEX IF NOT EXISTS i_act_ser  ON activity (serial)`,
 ]
 
 /**
@@ -130,6 +183,17 @@ export async function ensureSchema() {
   }
   if (!userCols.has('security_answer_hash')) {
     await db().execute('ALTER TABLE users ADD COLUMN security_answer_hash TEXT')
+  }
+  // 'admin' is the default so the existing owner account keeps full access
+  // without a migration step. QA accounts are created explicitly.
+  if (!userCols.has('role')) {
+    await db().execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
+  }
+  // Disabling is kept separate from deleting: an account that has listened to
+  // customer calls should stay in the activity log by name, so it must not be
+  // removable by turning off access.
+  if (!userCols.has('disabled')) {
+    await db().execute('ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0')
   }
 
   for (const statement of INDEXES) await db().execute(statement)
@@ -426,7 +490,23 @@ export async function clearFailures(ip: string | null): Promise<void> {
 
 /* -------------------------------------------------------------------- users */
 
-export type StoredUser = { username: string; passwordHash: string }
+/**
+ * 'admin' sees everything, including phone numbers, and manages accounts.
+ * 'qa' sees masked rows for the groups it has been granted, and nothing else.
+ */
+export type Role = 'admin' | 'qa'
+
+/** Anything unrecognised reads as 'admin' only for the env-seeded owner; every
+ *  stored row is written with an explicit role, so an unknown value here means
+ *  a hand-edited database and the safe reading is the stricter one. */
+export const asRole = (value: unknown): Role => (String(value) === 'qa' ? 'qa' : 'admin')
+
+export type StoredUser = {
+  username: string
+  passwordHash: string
+  role: Role
+  disabled: boolean
+}
 
 /** Usernames are email addresses, which are not case sensitive in practice. */
 export const normaliseUser = (username: string) => username.trim().toLowerCase()
@@ -438,12 +518,23 @@ export const normaliseUser = (username: string) => username.trim().toLowerCase()
 export async function getUser(username: string): Promise<StoredUser | null> {
   const key = normaliseUser(username)
   const found = await db().execute({
-    sql: 'SELECT username, password_hash FROM users WHERE lower(username) = ? LIMIT 1',
+    sql: `SELECT username, password_hash, role, disabled
+          FROM users WHERE lower(username) = ? LIMIT 1`,
     args: [key],
   })
   if (found.rows.length > 0) {
-    const r = found.rows[0] as unknown as { username: string; password_hash: string }
-    return { username: String(r.username), passwordHash: String(r.password_hash) }
+    const r = found.rows[0] as unknown as {
+      username: string
+      password_hash: string
+      role: string | null
+      disabled: number | null
+    }
+    return {
+      username: String(r.username),
+      passwordHash: String(r.password_hash),
+      role: asRole(r.role),
+      disabled: Number(r.disabled ?? 0) === 1,
+    }
   }
 
   const seedUser = process.env.ADMIN_USERNAME
@@ -458,7 +549,7 @@ export async function getUser(username: string): Promise<StoredUser | null> {
           ON CONFLICT (username) DO NOTHING`,
     args: [seedUser, seedHash, now()],
   })
-  return { username: seedUser, passwordHash: seedHash }
+  return { username: seedUser, passwordHash: seedHash, role: 'admin', disabled: false }
 }
 
 export async function setPassword(username: string, passwordHash: string): Promise<void> {

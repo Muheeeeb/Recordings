@@ -358,6 +358,13 @@ export default function SearchPage() {
           <div className="flex items-center gap-1">
             <SyncButton onFinished={afterSync} />
             <button
+              onClick={() => router.push('/admin')}
+              className="rounded-lg px-3 py-1.5 text-[13px] text-[var(--ink-2)] hover:bg-[var(--plane)]"
+              title="Activity log and QA accounts"
+            >
+              Admin
+            </button>
+            <button
               onClick={() => setShowSettings(true)}
               className="rounded-lg px-3 py-1.5 text-[13px] text-[var(--ink-2)] hover:bg-[var(--plane)]"
             >

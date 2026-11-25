@@ -6,6 +6,9 @@
  */
 
 import { SignJWT, jwtVerify } from 'jose'
+// Type-only, so nothing from the database layer is pulled into the Edge bundle
+// that runs the proxy.
+import type { Role } from './db'
 
 export const SESSION_COOKIE = 'rec_session'
 /**
@@ -26,8 +29,18 @@ function secretKey(): Uint8Array {
   return new TextEncoder().encode(secret)
 }
 
-export async function createSession(username: string): Promise<string> {
-  return new SignJWT({ sub: username })
+/**
+ * The role travels in the token so the proxy can decide which portal a request
+ * belongs to without a database round trip — the proxy runs on every request,
+ * including every Range request while audio plays.
+ *
+ * It is a routing hint and nothing more. A session lasts eight hours, which is
+ * long enough for an account to be demoted or switched off, so every handler
+ * that returns an unmasked phone number re-reads the role from the database
+ * (currentRole in lib/users.ts) instead of trusting this claim.
+ */
+export async function createSession(username: string, role: Role): Promise<string> {
+  return new SignJWT({ sub: username, role })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setAudience('session')
@@ -35,17 +48,29 @@ export async function createSession(username: string): Promise<string> {
     .sign(secretKey())
 }
 
-export async function readSession(token: string | undefined): Promise<string | null> {
+export type SessionClaims = { username: string; role: Role }
+
+export async function readSessionClaims(
+  token: string | undefined
+): Promise<SessionClaims | null> {
   if (!token) return null
   try {
     const { payload } = await jwtVerify(token, secretKey(), {
       algorithms: ['HS256'],
       audience: 'session',
     })
-    return typeof payload.sub === 'string' ? payload.sub : null
+    if (typeof payload.sub !== 'string') return null
+    // A token issued before the role claim existed is read as 'admin', which is
+    // what its holder already had. Only the owner account can be in that state,
+    // because QA accounts did not exist before the claim did.
+    return { username: payload.sub, role: payload.role === 'qa' ? 'qa' : 'admin' }
   } catch {
     return null
   }
+}
+
+export async function readSession(token: string | undefined): Promise<string | null> {
+  return (await readSessionClaims(token))?.username ?? null
 }
 
 export const sessionCookieOptions = {
