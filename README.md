@@ -25,7 +25,7 @@ The dialer has already changed this format once, so both are in the bucket:
 
 ```
    20260722-145445_5738740_CLOSER2-all.mp3          original
- S_20260727-160438_6256932_MAIN_4074731824-all.mp3  current
+ S_20260727-160438_6256932_MAIN_4075550147-all.mp3  current
  │  │        │      │       │    │           └ mix type
  │  │        │      │       │    └ customer phone number
  │  │        │      │       └ agent
