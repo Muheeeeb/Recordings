@@ -5,10 +5,13 @@ import {
   challengeCookieOptions,
   createChallenge,
   createSession,
+  readSessionClaims,
   sessionCookieOptions,
   verifyPassword,
 } from '@/lib/auth'
+import { cookies } from 'next/headers'
 import { checkThrottle, clearFailures, getSecurityChallenge, getUser, recordFailure } from '@/lib/db'
+import { logActivity } from '@/lib/activity'
 import { clientIp } from '@/lib/ip'
 
 /** Evens out the response time so a missing user is not detectable. */
@@ -43,9 +46,20 @@ export async function POST(request: Request) {
     if (throttle.blocked) return blockedResponse(throttle.retryAfter)
 
     const user = await getUser(username)
-    const ok = user !== null && (await verifyPassword(password, user.passwordHash))
+    // A disabled account fails exactly like a wrong password, and takes the
+    // same throttling path. Telling the holder that the account exists but has
+    // been switched off is information they do not need.
+    const ok =
+      user !== null && !user.disabled && (await verifyPassword(password, user.passwordHash))
 
     if (!ok) {
+      await logActivity({
+        username: username.slice(0, 120),
+        action: 'login_failed',
+        detail: user === null ? 'no such account' : user.disabled ? 'account disabled' : 'bad password',
+        ip,
+        ua: request.headers.get('user-agent'),
+      })
       const after = await recordFailure(ip)
       await new Promise((resolve) => setTimeout(resolve, FAILURE_DELAY_MS))
       if (after.blocked) return blockedResponse(after.retryAfter)
@@ -66,8 +80,25 @@ export async function POST(request: Request) {
     // alone completes the login. The UI prompts the owner to set one.
     if (!challenge) {
       await clearFailures(ip)
-      const response = NextResponse.json({ ok: true, step: 'done', securityQuestionSet: false })
-      response.cookies.set(SESSION_COOKIE, await createSession(user!.username), sessionCookieOptions)
+      await logActivity({
+        username: user!.username,
+        role: user!.role,
+        action: 'login',
+        detail: 'password only (no security question set)',
+        ip,
+        ua: request.headers.get('user-agent'),
+      })
+      const response = NextResponse.json({
+        ok: true,
+        step: 'done',
+        securityQuestionSet: false,
+        role: user!.role,
+      })
+      response.cookies.set(
+        SESSION_COOKIE,
+        await createSession(user!.username, user!.role),
+        sessionCookieOptions
+      )
       return response
     }
 
@@ -90,7 +121,20 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
+  // Logged before the cookie is cleared, so the log shows who signed out
+  // rather than an anonymous event.
+  const claims = await readSessionClaims((await cookies()).get(SESSION_COOKIE)?.value)
+  if (claims) {
+    await logActivity({
+      username: claims.username,
+      role: claims.role,
+      action: 'logout',
+      ip: clientIp(request.headers),
+      ua: request.headers.get('user-agent'),
+    })
+  }
+
   const response = NextResponse.json({ ok: true })
   response.cookies.set(SESSION_COOKIE, '', { ...sessionCookieOptions, maxAge: 0 })
   response.cookies.set(CHALLENGE_COOKIE, '', { ...challengeCookieOptions, maxAge: 0 })

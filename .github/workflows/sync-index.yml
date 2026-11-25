@@ -81,6 +81,19 @@ jobs:
           set -o pipefail
           npx tsx scripts/prune-index.ts --apply | tee prune.log
 
+      # The activity log grows with every play, search and sign-in. Trimmed on
+      # the same weekly pass as the index, and only ever down to the retention
+      # window — this deletes an audit trail, so it is not run more often or
+      # more aggressively than it has to be.
+      - name: Prune the activity log
+        if: steps.scope.outputs.prune == 'yes'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -o pipefail
+          npx tsx scripts/prune-activity.ts --apply | tee activity.log
+
       # Makes the Actions page show what happened without opening the log.
       - name: Summary
         if: always()
@@ -100,6 +113,13 @@ jobs:
               echo "#### Pruned"
               echo '```'
               tail -n 8 prune.log
+              echo '```'
+            fi
+            if [ -f activity.log ]; then
+              echo ""
+              echo "#### Activity log"
+              echo '```'
+              tail -n 5 activity.log
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
