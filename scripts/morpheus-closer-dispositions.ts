@@ -31,14 +31,27 @@ async function disposition(base: string, headers: Record<string, string>, uuid: 
   return null
 }
 
+/**
+ * One line of morpheus-manifest.jsonl, as much of it as this script reads.
+ * The index signature keeps the rest of the record reachable, because each
+ * matching leg is written back out verbatim.
+ */
+type ManifestRow = {
+  scope?: string
+  call_uuid?: string | null
+  created_at: string
+  file_size?: number | null
+  [field: string]: unknown
+}
+
 async function main() {
   const inst = instances()[0]
   const rows = readFileSync('morpheus-manifest.jsonl', 'utf8')
-    .split('\n').filter(Boolean).map((l) => JSON.parse(l))
-    .filter((r: any) => r.scope === 'closer')
+    .split('\n').filter(Boolean).map((l) => JSON.parse(l) as ManifestRow)
+    .filter((r) => r.scope === 'closer')
 
   // One lookup per CALL, not per recording — several legs share a call_uuid.
-  const byCall = new Map<string, any[]>()
+  const byCall = new Map<string, ManifestRow[]>()
   for (const r of rows) {
     if (!r.call_uuid) continue
     byCall.set(r.call_uuid, [...(byCall.get(r.call_uuid) ?? []), r])
@@ -66,7 +79,7 @@ async function main() {
         if (SALE_LIKE.test(code)) {
           c.sale++
           c.recs += legs.length
-          c.bytes += legs.reduce((s: number, l: any) => s + (l.file_size ?? 0), 0)
+          c.bytes += legs.reduce((s: number, l: ManifestRow) => s + (l.file_size ?? 0), 0)
           for (const l of legs) out.write(JSON.stringify({ ...l, disposition: code }) + '\n')
         }
         byDay.set(day, c)

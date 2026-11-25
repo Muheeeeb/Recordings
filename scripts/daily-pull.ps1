@@ -29,7 +29,7 @@ param(
   [int]$Days = 7,
   [int]$Concurrency = 8,
   [int]$Recent = 8,
-  [int]$LagDays = 2,
+  [int]$LagDays = 3,
   [switch]$DryRun,
   [switch]$SkipIndex,
   [switch]$Check
@@ -129,12 +129,19 @@ $start = Get-Date
 '' | Out-File -FilePath $log -Encoding utf8   # start the file, UTF-8, empty
 ('=== pull ' + $start.ToString('yyyy-MM-dd HH:mm:ss') + ' ===') | Write-Log
 
-# Why the window ends two days back instead of today. The dialer records to
-# uncompressed WAV and re-encodes to M4A about a day and a half later - the
-# vendor's words: "This is by design. If you want M4A recording format, pull
-# recordings after 24 hours in Basic plan." A WAV is roughly 4x the bytes of
-# the same call, so pulling today's calls would quadruple storage for no gain.
-# Two days back clears the lag with room to spare.
+# Why the window ends three days back instead of today. The dialer records to
+# uncompressed WAV and re-encodes to M4A 24 hours later - the vendor's words:
+# "This is by design. If you want M4A recording format, pull recordings after
+# 24 hours in Basic plan." A WAV is roughly 4x the bytes of the same call, so
+# pulling a day before it has converted would quadruple storage for no gain.
+#
+# Measured twice, on 23 and 24 Nov 2026, the boundary within a day fell almost
+# exactly 24 hours after each recording was created. Two days of lag is
+# therefore not enough: this job runs at 06:00 local, which is 01:00 UTC, and
+# the newest recording of a UTC day two days back is only 25 hours old at that
+# moment. Every run would fetch the last hour of that day as WAV, discard it,
+# and fetch it again tomorrow - a few hundred megabytes a day for nothing.
+# Three days costs one extra day of delay and removes the waste entirely.
 #
 # This only avoids wasted downloads; it is not the real guard. The puller
 # checks each downloaded file and leaves a WAV on the dialer for a later run,

@@ -162,9 +162,12 @@ async function idsInS3(s3: S3Client, folders: string[]): Promise<Set<string> | n
           if (m) ids.add(m[1].toLowerCase())
         }
         token = res.IsTruncated ? res.NextContinuationToken : undefined
-      } catch (e: any) {
-        const code = e?.name ?? e?.Code ?? ''
-        if (/AccessDenied/i.test(code) || /AccessDenied/i.test(String(e?.message))) return null
+      } catch (e) {
+        // Narrowed rather than typed as any: an SDK error reports its kind on
+        // `name`, an older one on `Code`, and neither is on the Error type.
+        const err = e as { name?: string; Code?: string; message?: string }
+        const code = err?.name ?? err?.Code ?? ''
+        if (/AccessDenied/i.test(code) || /AccessDenied/i.test(String(err?.message))) return null
         throw e
       }
     } while (token)
@@ -316,9 +319,10 @@ async function pullDay(
           appendFileSync(STATE_FILE, `${r.id.replace(/-/g, '').toLowerCase()}\n`)
           uploaded++
           bytes += body.length
-        } catch (e: any) {
+        } catch (e) {
+          const err = e as { message?: string }
           failed++
-          if (problems.length < 5) problems.push(`${r.id.slice(0, 8)} ${(e?.message ?? e).toString().slice(0, 60)}`)
+          if (problems.length < 5) problems.push(`${r.id.slice(0, 8)} ${(err?.message ?? e)?.toString().slice(0, 60)}`)
         }
       }
     })
@@ -339,7 +343,7 @@ async function main() {
   const folders = ['Morpheus_ACA_Closer', 'Morpheus_Med_Closer', 'Morpheus_Self_Verifier', 'Morpheus_Closer_Other']
 
   // Which days to pull.
-  let days: string[] = []
+  const days: string[] = []
   const from = arg('from')
   const to = arg('to')
   if (from) {

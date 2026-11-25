@@ -156,7 +156,7 @@ WARNING: roster has labels from ${missing.join(', ')} but no credentials for the
     summary.push(`${askedId},"${askedName}",${hits.length},${rows.length},${xfer.length},${hits.map((h) => h.dialerId).join('/')}`)
   }
 
-  console.log(`\n   TOTAL for the seven: ${grandRows} recordings, ${gb(grandBytes)} GB`)
+  console.log(`\n   TOTAL for the seven: ${grandRows} recordings, ${gb(grandBytes)} GB, ${grandXfer} transferred`)
 
   console.log(`\n${'='.repeat(74)}\nCLOSER AND CLOSER2 CAMPAIGNS\n${'='.repeat(74)}`)
 

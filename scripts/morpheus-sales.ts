@@ -177,8 +177,8 @@ async function main() {
   let closerNote = 'not checked'
   try {
     const closers: Lite[] = readFileSync('morpheus-manifest.jsonl', 'utf8')
-      .split('\n').filter(Boolean).map((l) => JSON.parse(l))
-      .filter((r: any) => isCloserCampaign(r.campaign))
+      .split('\n').filter(Boolean).map((l) => JSON.parse(l) as Lite)
+      .filter((r) => isCloserCampaign(r.campaign))
     const picks = Array.from({ length: Math.min(CLOSER_SAMPLE, closers.length) }, (_, i) =>
       closers[Math.floor((i * closers.length) / Math.min(CLOSER_SAMPLE, closers.length))]
     )
