@@ -2,8 +2,8 @@
  * Command-line search over the index — the same query the website runs, usable
  * when the site itself is unavailable.
  *
- *   npx tsx --env-file=.env.local scripts/find.ts 2515255371
- *   npx tsx --env-file=.env.local scripts/find.ts 2515255371 --download
+ *   npx tsx --env-file=.env.local scripts/find.ts 2515550171
+ *   npx tsx --env-file=.env.local scripts/find.ts 2515550171 --download
  *
  * --download needs AWS credentials for the reader profile:
  *   $env:AWS_PROFILE="reader"

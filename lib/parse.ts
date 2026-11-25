@@ -5,7 +5,7 @@
  * a customer phone number — so nothing here depends on a field's position:
  *
  *     20260722-145445_5738740_CLOSER2-all.mp3
- *   S_20260727-160438_6256932_MAIN_4074731824-all.mp3
+ *   S_20260727-160438_6256932_MAIN_4075550147-all.mp3
  *
  * The timestamp is located by matching it rather than by taking the first
  * token, and every token after it is classified by shape:
@@ -75,7 +75,7 @@ export function parseRecording(key: string): Recording {
 
   const rest = tokens.slice(stampIndex + 1)
 
-  // The mix type is a suffix on the final token (…_MAIN_4074731824-all), so it
+  // The mix type is a suffix on the final token (…_MAIN_4075550147-all), so it
   // is peeled off before the token is classified.
   if (rest.length > 0) {
     const last = rest[rest.length - 1]

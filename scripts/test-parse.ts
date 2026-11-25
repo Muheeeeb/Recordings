@@ -9,8 +9,8 @@ import { parseRecording } from '../lib/parse'
 const cases: { key: string; expect: Partial<Record<'leadId' | 'phone' | 'agent' | 'mix', string>> }[] = [
   // Current format: S_ prefix and the customer phone number.
   {
-    key: 'dialer/Main_ACA_Fronter/20260727/S_20260727-160438_6256932_MAIN_4074731824-all.mp3',
-    expect: { leadId: '6256932', phone: '4074731824', agent: 'MAIN', mix: 'all' },
+    key: 'dialer/Main_ACA_Fronter/20260727/S_20260727-160438_6256932_MAIN_4075550147-all.mp3',
+    expect: { leadId: '6256932', phone: '4075550147', agent: 'MAIN', mix: 'all' },
   },
   // Original format, still present for everything indexed before the change.
   {
@@ -19,8 +19,8 @@ const cases: { key: string; expect: Partial<Record<'leadId' | 'phone' | 'agent' 
   },
   // A phone number carrying the US country code.
   {
-    key: 'dialer/Main_ACA_Fronter/20260727/S_20260727-160438_6256932_MAIN2_14074731824-all.mp3',
-    expect: { leadId: '6256932', phone: '4074731824', agent: 'MAIN2', mix: 'all' },
+    key: 'dialer/Main_ACA_Fronter/20260727/S_20260727-160438_6256932_MAIN2_14075550147-all.mp3',
+    expect: { leadId: '6256932', phone: '4075550147', agent: 'MAIN2', mix: 'all' },
   },
   // Other mix types and extensions VICIdial emits.
   {
@@ -35,7 +35,7 @@ const cases: { key: string; expect: Partial<Record<'leadId' | 'phone' | 'agent' 
   // Rockey also writes the timestamp without a dash. These were rejected
   // outright before, so the recordings never reached the index at all.
   {
-    key: 'dialer/Rockey_Dialer/20260508115740_202_8416613235161837-all.mp3',
+    key: 'dialer/Rockey_Dialer/20260508115740_202_8415550188161837-all.mp3',
     expect: { mix: 'all' },
   },
   // Phone number but no lead id.

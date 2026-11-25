@@ -3,7 +3,7 @@
  * id and the raw filename, so a number that sits in an unexpected position or
  * carries a country code still turns up.
  *
- *   npx tsx --env-file=.env.local scripts/find-loose.ts 2515255371
+ *   npx tsx --env-file=.env.local scripts/find-loose.ts 2515550171
  */
 
 import { db } from '../lib/db'
