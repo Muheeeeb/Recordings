@@ -106,6 +106,8 @@ export default function AdminPage() {
       </header>
 
       <div className="mx-auto max-w-6xl space-y-5 px-4 py-6">
+        <SerialLookup />
+
         <div className="flex w-fit overflow-hidden rounded-lg border border-[var(--hairline)] text-[13px]">
           {(['activity', 'accounts'] as const).map((name) => (
             <button
@@ -125,6 +127,114 @@ export default function AdminPage() {
         {tab === 'activity' ? <ActivityTab /> : <AccountsTab />}
       </div>
     </main>
+  )
+}
+
+/* ---------------------------------------------------------------- serial lookup */
+
+/**
+ * Paste a serial off a QA report and get the real call.
+ *
+ * Above the tabs rather than inside the activity log, because the two answer
+ * different questions. The log answers "what did this person do", and a serial
+ * only reaches it once somebody has played that recording -- so looking one up
+ * through the log finds nothing for every recording nobody has played yet,
+ * which is most of them. This asks the index directly.
+ *
+ * Resolving a serial is itself written to the log, as admin_lookup, so the
+ * audit trail covers the people reading the audit trail.
+ */
+function SerialLookup() {
+  const [term, setTerm] = useState('')
+  const [lookup, setLookup] = useState<Lookup | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function open() {
+    const value = term.trim()
+    if (!value) return
+    setBusy(true)
+    setError(null)
+    setLookup(null)
+    try {
+      const response = await fetch('/api/play?serial=' + encodeURIComponent(value), {
+        cache: 'no-store',
+      })
+      const body = await response.json()
+      if (!response.ok) {
+        setError(body.error ?? 'Could not open that serial')
+        return
+      }
+      setLookup({ serial: body.serial, url: body.url, details: body.details })
+    } catch {
+      setError('Could not reach the server')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <section className={card + ' p-4'}>
+        <h2 className="text-[15px] font-semibold text-[var(--ink)]">Open a serial</h2>
+        <p className="mb-3 text-[13px] text-[var(--muted)]">
+          The reference a QA associate writes on a report. Returns the real call, number
+          included. PN-0000123, pn-123 and 123 all work.
+        </p>
+        <div className="flex gap-2">
+          <input
+            value={term}
+            onChange={(ev) => setTerm(ev.target.value)}
+            onKeyDown={(ev) => {
+              if (ev.key === 'Enter') void open()
+            }}
+            placeholder="PN-0000123"
+            className={control + ' w-56 font-mono'}
+          />
+          <button
+            onClick={() => void open()}
+            disabled={busy || !term.trim()}
+            className="rounded-lg bg-[var(--ink)] px-5 py-2 font-medium text-[var(--surface)] hover:opacity-90 disabled:opacity-50"
+          >
+            {busy ? 'Opening...' : 'Open'}
+          </button>
+        </div>
+        {error && (
+          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+            {error}
+          </p>
+        )}
+      </section>
+
+      {lookup && <LookupCard lookup={lookup} onClose={() => setLookup(null)} />}
+    </>
+  )
+}
+
+/** The resolved call: who it was, when, and the audio. Admin only, so unmasked. */
+function LookupCard({ lookup, onClose }: { lookup: Lookup; onClose: () => void }) {
+  return (
+    <section className={card + ' p-4'}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-mono text-[15px] font-semibold text-[var(--ink)]">
+            {serialLabel(lookup.serial)}
+          </h2>
+          <p className="mt-1 text-[13px] text-[var(--muted)]">
+            {lookup.details?.phone ?? 'no number'} \u00b7 {lookup.details?.agent ?? 'no agent'} \u00b7{' '}
+            {lookup.details?.group?.replace(/_/g, ' ') ?? '\u2014'} \u00b7{' '}
+            {lookup.details?.recordedAt ?? '\u2014'}
+          </p>
+        </div>
+        <button
+          onClick={onClose}
+          className="text-[13px] text-[var(--muted)] hover:text-[var(--ink)]"
+        >
+          Close
+        </button>
+      </div>
+      <audio src={lookup.url} controls autoPlay className="mt-3 w-full" />
+    </section>
   )
 }
 
@@ -256,29 +366,7 @@ function ActivityTab() {
         </p>
       )}
 
-      {lookup && (
-        <section className={`${card} p-4`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="font-mono text-[15px] font-semibold text-[var(--ink)]">
-                {serialLabel(lookup.serial)}
-              </h2>
-              <p className="mt-1 text-[13px] text-[var(--muted)]">
-                {lookup.details?.phone ?? 'no number'} · {lookup.details?.agent ?? 'no agent'} ·{' '}
-                {lookup.details?.group?.replace(/_/g, ' ') ?? '—'} ·{' '}
-                {lookup.details?.recordedAt ?? '—'}
-              </p>
-            </div>
-            <button
-              onClick={() => setLookup(null)}
-              className="text-[13px] text-[var(--muted)] hover:text-[var(--ink)]"
-            >
-              Close
-            </button>
-          </div>
-          <audio src={lookup.url} controls autoPlay className="mt-3 w-full" />
-        </section>
-      )}
+      {lookup && <LookupCard lookup={lookup} onClose={() => setLookup(null)} />}
 
       <section className={`${card} overflow-hidden`}>
         {rows.length === 0 && !loading && (

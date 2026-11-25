@@ -105,17 +105,21 @@ export default function QaPortal() {
     [q, group, from, to, router]
   )
 
-  // Only on mount: afterwards the filters are applied by the Search button, so
-  // typing does not fire a request per keystroke.
+  // The group and the dates apply as soon as they change, which is how the
+  // main dashboard behaves — leaving them to the Search button made them look
+  // broken. The text box is deliberately not in here: it waits for Enter or
+  // the button, so typing an agent name does not fire a request per keystroke.
   //
-  // Deferred rather than called in the effect body because load() sets the
-  // loading flag synchronously, and a synchronous setState inside an effect
-  // causes the cascading render React now warns about.
+  // Deferred rather than called in the effect body for two reasons. A date
+  // input emits a change for every digit edited, so the delay coalesces
+  // "2", "20", "202", "2026" into one request. And load() sets the loading
+  // flag synchronously, which inside an effect body is the cascading render
+  // React now warns about.
   useEffect(() => {
-    const timer = setTimeout(() => void load(), 0)
+    const timer = setTimeout(() => void load(), 200)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [group, from, to])
 
   async function signOut() {
     await fetch('/api/login', { method: 'DELETE' })
