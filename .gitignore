@@ -39,3 +39,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local data the scripts produce. These hold customer phone numbers — the
+# manifest alone has over twenty thousand — so they must never reach the
+# repository. Nothing the app serves reads them; they are regenerable from
+# the dialer or from the bucket.
+/morpheus-*.json
+/morpheus-*.jsonl
+/morpheus-uploaded.txt
+
+# Run logs from the daily pull, and the copies taken before editing a script.
+/logs/
+*.bak
+*.bak[0-9]

@@ -29,15 +29,22 @@ const MAP = new Map<string, Dialer>(
       ['Main_Medicare_Fronter', 'CCS'],
       ['KTN_Group', 'KTN'],
       ['Rockey_Dialer', 'Rockey'],
-      // One folder per campaign worth keeping. An earlier ACA/Medicare split
-      // was dropped because the API exposes no product on a recording, so
-      // there was nothing to sort those calls by.
-      //
-      // Only these three are imported. Recordings on the bots campaign, and
-      // those whose campaign comes back blank, are deliberately skipped.
+      // Only closers and the self verifier are imported. Fronter, the bots
+      // campaign and recordings whose campaign comes back blank are skipped
+      // deliberately — Fronter alone is 69,000 calls a day.
       ['Morpheus_Fronter', 'Morpheus'],
       ['Morpheus_Closer', 'Morpheus'],
       ['Morpheus_Closer2', 'Morpheus'],
+      // Morpheus renamed its campaigns on 20 Nov 2026: Closer became
+      // ACA-CLOSER and Closer2 became Med-Closer, which puts the product in
+      // the campaign instead of only in the agent's label. The folders we pull
+      // into follow the new names; the two above stay mapped so anything
+      // already filed under them keeps its dialer.
+      ['Morpheus_ACA_Closer', 'Morpheus'],
+      ['Morpheus_Med_Closer', 'Morpheus'],
+      ['Morpheus_Self_Verifier', 'Morpheus'],
+      // A closer campaign under a name we have not seen yet is still Morpheus.
+      ['Morpheus_Closer_Other', 'Morpheus'],
     ] as [string, Dialer][]
   ).map(([group, dialer]) => [normalise(group), dialer])
 )
